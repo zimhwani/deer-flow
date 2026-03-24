@@ -46,11 +46,11 @@ async def main():
     async with aiohttp.ClientSession() as session:
         async with session.post(
             otp_url,
-            json={},
             headers={
                 "Authorization": f"Bearer {token}",
                 "Deriv-App-ID": app_id,
             },
+            skip_auto_headers=frozenset({"Content-Type"}),
         ) as resp:
             body = await resp.text()
             print(f"    Status : {resp.status}")
