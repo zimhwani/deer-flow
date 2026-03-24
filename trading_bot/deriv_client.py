@@ -248,7 +248,7 @@ class DerivClient:
         basis: 'stake' (amount you pay) or 'payout' (amount you receive if win)
         currency: account currency; falls back to account_info if not supplied
         """
-        trade_currency = currency or self.account_info.get("currency", "USD")
+        trade_currency = currency or self.account_info.get("currency") or "USD"
         # First get a price proposal
         proposal = await self.send({
             "proposal": 1,

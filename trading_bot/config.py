@@ -17,7 +17,7 @@ class TradingConfig:
     account_id: str = ""               # Your Deriv account ID (e.g. DOT90279522 or CR1234567)
 
     # Account settings
-    currency: str = "AUD"
+    currency: str = "USD"
     starting_balance: float = 100.0
 
     # Risk management

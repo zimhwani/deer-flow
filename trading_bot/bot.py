@@ -166,7 +166,8 @@ class TradingBot:
             return
 
         stake = self.risk.calculate_stake(self._balance)
-        logger.info(f"Placing {signal.signal.name} trade | Stake: {stake:.2f} AUD")
+        currency = self.client.account_info.get("currency", self.config.currency)
+        logger.info(f"Placing {signal.signal.name} trade | Stake: {stake:.2f} {currency}")
 
         try:
             contract = await self.client.buy_contract(
@@ -215,10 +216,11 @@ class TradingBot:
     def _print_status(self) -> None:
         """Print a status summary."""
         stats = self.risk.get_stats()
+        currency = self.client.account_info.get("currency", self.config.currency)
         logger.info(
             f"\n{'─'*50}\n"
-            f"  Balance:      {self._balance:.2f} AUD\n"
-            f"  Daily P&L:    {stats['daily_pnl_aud']:+.2f} AUD\n"
+            f"  Balance:      {self._balance:.2f} {currency}\n"
+            f"  Daily P&L:    {stats['daily_pnl_aud']:+.2f} {currency}\n"
             f"  Total Trades: {stats['total_trades']} "
             f"(W:{stats['wins']} / L:{stats['losses']} | {stats['win_rate_pct']:.0f}%)\n"
             f"  Open:         {stats['open_positions']}/{self.config.max_open_positions}\n"
