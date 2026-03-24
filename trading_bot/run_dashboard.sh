@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # Run the trading bot dashboard
 set -e
-cd "$(dirname "$0")"
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
 
 # Load .env if present
 if [ -f .env ]; then
-  export $(grep -v '^#' .env | xargs)
+  set -a
+  source .env
+  set +a
 fi
 
 # Activate venv if present
@@ -15,4 +19,6 @@ fi
 
 PORT="${DASHBOARD_PORT:-8080}"
 echo "Starting dashboard on http://localhost:${PORT}"
-python -m trading_bot.dashboard "$@"
+
+# Run dashboard.py directly (avoids module resolution issues)
+python dashboard.py "$@"
