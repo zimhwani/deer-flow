@@ -230,6 +230,10 @@ async def main(config_path: Optional[str] = None) -> None:
     """Entry point for the trading bot."""
     config = load_config(config_path)
 
+    # Ensure data directory exists before opening log file
+    import os
+    os.makedirs(config.data_dir, exist_ok=True)
+
     # Set up logging
     log_level = getattr(logging, config.log_level.upper(), logging.INFO)
     logging.basicConfig(

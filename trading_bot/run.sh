@@ -25,6 +25,7 @@ if [[ -z "${DERIV_API_TOKEN:-}" ]]; then
 fi
 
 mkdir -p ./data
+mkdir -p ../data
 
 # Install dependencies into a virtual environment
 if [[ ! -d ".venv" ]]; then
