@@ -13,8 +13,8 @@ from typing import Optional
 class TradingConfig:
     # Deriv API settings
     api_token: str = ""
-    app_id: str = "1089"                # Deriv default app_id for testing
-    ws_url: str = "wss://ws.derivws.com/websockets/v3"
+    app_id: str = ""                    # Alphanumeric App ID from developers.deriv.com
+    account_id: str = ""               # Your Deriv account ID (e.g. DOT90279522 or CR1234567)
 
     # Account settings
     currency: str = "AUD"
@@ -60,7 +60,7 @@ def load_config(config_path: Optional[str] = None) -> TradingConfig:
     env_map = {
         "DERIV_API_TOKEN": "api_token",
         "DERIV_APP_ID": "app_id",
-        "DERIV_WS_URL": "ws_url",
+        "DERIV_ACCOUNT_ID": "account_id",
         "TRADING_CURRENCY": "currency",
         "TRADING_STARTING_BALANCE": "starting_balance",
         "TRADING_SYMBOL": "symbol",

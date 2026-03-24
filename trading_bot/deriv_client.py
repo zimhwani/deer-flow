@@ -9,8 +9,11 @@ import logging
 import time
 from typing import Any, Callable, Dict, Optional
 
+import aiohttp
 import websockets
 from websockets.exceptions import ConnectionClosed
+
+_REST_BASE = "https://api.derivws.com"
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +21,10 @@ logger = logging.getLogger(__name__)
 class DerivClient:
     """Async WebSocket client for Deriv.com API."""
 
-    def __init__(self, api_token: str, app_id: str, ws_url: str):
+    def __init__(self, api_token: str, app_id: str, account_id: str):
         self.api_token = api_token
         self.app_id = app_id
-        self.ws_url = f"{ws_url}?app_id={app_id}"
+        self.account_id = account_id
         self.ws: Optional[websockets.WebSocketClientProtocol] = None
         self._req_id = 0
         self._pending: Dict[int, asyncio.Future] = {}
@@ -34,11 +37,28 @@ class DerivClient:
         self._req_id += 1
         return self._req_id
 
+    async def _get_otp_url(self) -> str:
+        """Call REST API to get an authenticated WebSocket URL (OTP)."""
+        url = f"{_REST_BASE}/trading/v1/options/accounts/{self.account_id}/otp"
+        headers = {
+            "Authorization": f"Bearer {self.api_token}",
+            "Deriv-App-ID": self.app_id,
+        }
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers) as resp:
+                if resp.status != 200:
+                    text = await resp.text()
+                    raise RuntimeError(f"OTP request failed ({resp.status}): {text}")
+                data = await resp.json()
+                return data["data"]["url"]
+
     async def connect(self) -> None:
-        """Establish WebSocket connection."""
+        """Establish WebSocket connection via OTP-authenticated URL."""
+        logger.info("Requesting authenticated WebSocket URL...")
+        ws_url = await self._get_otp_url()
         logger.info("Connecting to Deriv API...")
         self.ws = await websockets.connect(
-            self.ws_url,
+            ws_url,
             ping_interval=30,
             ping_timeout=10,
         )
@@ -55,14 +75,15 @@ class DerivClient:
         logger.info("Disconnected from Deriv API")
 
     async def authorize(self) -> Dict[str, Any]:
-        """Authorize with API token."""
-        resp = await self.send({"authorize": self.api_token})
-        if "error" in resp:
-            raise RuntimeError(f"Authorization failed: {resp['error']['message']}")
+        """Auth is handled via OTP URL; fetch account info from balance."""
         self.is_authorized = True
-        self.account_info = resp.get("authorize", {})
+        balance = await self.get_balance()
+        self.account_info = {
+            "balance": balance.get("balance", 0),
+            "currency": balance.get("currency", ""),
+        }
         logger.info(
-            f"Authorized as {self.account_info.get('email', 'unknown')} "
+            f"Connected to account {self.account_id} "
             f"| Balance: {self.account_info.get('balance', 0)} "
             f"{self.account_info.get('currency', '')}"
         )
@@ -216,7 +237,7 @@ class DerivClient:
             "currency": "AUD",
             "duration": duration,
             "duration_unit": duration_unit,
-            "symbol": symbol,
+            "underlying_symbol": symbol,
         })
 
         if "error" in proposal:

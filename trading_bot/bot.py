@@ -33,7 +33,7 @@ class TradingBot:
         self.client = DerivClient(
             api_token=config.api_token,
             app_id=config.app_id,
-            ws_url=config.ws_url,
+            account_id=config.account_id,
         )
         self.risk = RiskManager(
             starting_balance=config.starting_balance,
