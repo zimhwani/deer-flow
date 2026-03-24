@@ -107,7 +107,7 @@ class RiskManager:
         max_stake = balance * (self.max_risk_per_trade_pct / 100)
         stake = balance * 0.015
         stake = min(stake, max_stake)
-        stake = max(stake, 150.0)  # minimum stake $150
+        stake = max(stake, 1.0)  # minimum stake $1
         return round(stake, 2)
 
     # ---- Trading permission checks ----
