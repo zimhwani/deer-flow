@@ -433,7 +433,7 @@ HTML = """<!DOCTYPE html>
     <div class="logo">📈</div>
     <div class="header-title">
       <h1>Tapi's Trading Bot</h1>
-      <p>Deriv · Volatility 10 Index · Demo</p>
+      <p>Deriv · Volatility 10 Index · Real Money</p>
     </div>
   </div>
   <div class="header-right">
