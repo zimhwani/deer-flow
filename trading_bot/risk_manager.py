@@ -45,6 +45,7 @@ class RiskManager:
         self._today: date = date.today()
         self._trade_log: List[Dict] = []
         self._session_start_balance: float = starting_balance
+        self._current_balance: float = starting_balance
 
         os.makedirs(data_dir, exist_ok=True)
         self._load_state()
@@ -70,10 +71,16 @@ class RiskManager:
             except Exception as e:
                 logger.warning(f"Could not load risk state: {e}")
 
+    def update_balance(self, balance: float) -> None:
+        """Update the current account balance and persist it."""
+        self._current_balance = balance
+        self._save_state()
+
     def _save_state(self) -> None:
         state = {
             "date": str(date.today()),
             "daily_pnl": self._daily_pnl,
+            "balance": self._current_balance,
             "trade_log": self._trade_log[-100:],
             "open_positions": list(self._open_positions.values()),
         }

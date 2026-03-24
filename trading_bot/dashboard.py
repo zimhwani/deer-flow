@@ -65,6 +65,7 @@ async def api_stats(request):
     payload = {
         "date": state.get("date", ""),
         "daily_pnl": round(state.get("daily_pnl", 0.0), 2),
+        "balance": round(state.get("balance", 0.0), 2),
         "total_trades": len(trades),
         "wins": len(wins),
         "losses": len(losses),
@@ -209,7 +210,7 @@ HTML = """<!DOCTYPE html>
   /* ── Stat Cards ── */
   .stats-grid {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(6, 1fr);
     gap: 14px;
     padding: 24px 28px 0;
   }
@@ -411,6 +412,9 @@ HTML = """<!DOCTYPE html>
   .ticker-item { white-space: nowrap; }
   .ticker-item span { color: var(--text); font-weight: 500; margin-left: 4px; }
 
+  @media (max-width: 1100px) {
+    .stats-grid { grid-template-columns: repeat(3, 1fr); }
+  }
   @media (max-width: 900px) {
     .stats-grid { grid-template-columns: repeat(3, 1fr); }
     .charts-row, .bottom-row { grid-template-columns: 1fr; }
@@ -450,6 +454,12 @@ HTML = """<!DOCTYPE html>
 </div>
 
 <div class="stats-grid">
+  <div class="stat-card" style="--accent: var(--green)">
+    <span class="icon">🏦</span>
+    <div class="label">Account Balance</div>
+    <div class="value white" id="account-balance">—</div>
+    <div class="sub">Live balance</div>
+  </div>
   <div class="stat-card" style="--accent: var(--green)">
     <span class="icon">💰</span>
     <div class="label">Daily P&L</div>
@@ -598,8 +608,14 @@ async function fetchStats() {
     const pnl = d.daily_pnl ?? 0;
     const tp  = d.total_profit ?? 0;
     const wr  = d.win_rate ?? 0;
+    const bal = d.balance ?? 0;
 
     // Cards
+    const balEl = document.getElementById('account-balance');
+    if (bal > 0) {
+      balEl.textContent = '$' + bal.toFixed(2);
+    }
+
     const pnlEl = document.getElementById('daily-pnl');
     pnlEl.textContent = fmt(pnl) + ' USD';
     pnlEl.className = 'value ' + colorClass(pnl);

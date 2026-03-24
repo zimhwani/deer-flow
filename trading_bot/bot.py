@@ -97,6 +97,7 @@ class TradingBot:
         await self.client.authorize()
         balance_info = await self.client.get_balance()
         self._balance = float(balance_info.get("balance", self.config.starting_balance))
+        self.risk.update_balance(self._balance)
         logger.info(f"Account balance: {self._balance:.2f} {self.config.currency}")
 
         # Start the main loop
@@ -120,6 +121,7 @@ class TradingBot:
                 try:
                     balance_info = await self.client.get_balance()
                     self._balance = float(balance_info.get("balance", self._balance))
+                    self.risk.update_balance(self._balance)
                 except Exception as e:
                     logger.warning(f"Balance refresh failed: {e}")
 
@@ -209,6 +211,7 @@ class TradingBot:
                     # Update balance
                     balance_info = await self.client.get_balance()
                     self._balance = float(balance_info.get("balance", self._balance))
+                    self.risk.update_balance(self._balance)
 
             except Exception as e:
                 logger.warning(f"Could not check contract {contract_id}: {e}")
