@@ -14,7 +14,7 @@ class TradingConfig:
     # Deriv API settings
     api_token: str = ""
     app_id: str = "1089"                # Deriv default app_id for testing
-    ws_url: str = "wss://ws.binaryws.com/websockets/v3"
+    ws_url: str = "wss://ws.derivws.com/websockets/v3"
 
     # Account settings
     currency: str = "AUD"
