@@ -116,10 +116,14 @@ class RiskManager:
         """Check if trading is allowed right now."""
         self._check_new_day()
 
-        # Daily loss limit
-        loss_limit = self.starting_balance * (self.max_daily_loss_pct / 100)
+        # Daily loss limit (based on current balance, not hardcoded starting balance)
+        loss_limit = self._current_balance * (self.max_daily_loss_pct / 100)
         if self._daily_pnl <= -loss_limit:
             return False, f"Daily loss limit reached ({self._daily_pnl:.2f} AUD). Stopping for today."
+
+        # Open position limit
+        if len(self._open_positions) >= self.max_open_positions:
+            return False, f"Max open positions reached ({len(self._open_positions)}/{self.max_open_positions})"
 
         # Minimum balance check
         if balance < 1.0:
