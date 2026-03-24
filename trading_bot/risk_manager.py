@@ -116,11 +116,6 @@ class RiskManager:
         if self._daily_pnl <= -loss_limit:
             return False, f"Daily loss limit reached ({self._daily_pnl:.2f} AUD). Stopping for today."
 
-        # Daily profit target (optional pause)
-        profit_target = self.starting_balance * (self.daily_profit_target_pct / 100)
-        if self._daily_pnl >= profit_target:
-            return False, f"Daily profit target hit ({self._daily_pnl:.2f} AUD). Taking rest."
-
         # Max open positions
         if len(self._open_positions) >= self.max_open_positions:
             return False, f"Max open positions reached ({len(self._open_positions)}/{self.max_open_positions})"
