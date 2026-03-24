@@ -223,28 +223,63 @@ class TradingBot:
             logger.error(f"Failed to place trade: {e}")
 
     async def _check_open_positions(self) -> None:
-        """Poll open positions to detect settled contracts."""
+        """Detect settled contracts via account statement (primary) and contract poll (fallback)."""
         open_positions = self.risk.get_open_positions()
         if not open_positions:
             return
 
-        for contract_id in list(open_positions.keys()):
+        closed_ids: set = set()
+
+        # --- Primary: account statement ---
+        try:
+            statement = await self.client.get_statement(limit=50)
+            transactions = statement.get("transactions", [])
+            logger.debug(f"Statement: {len(transactions)} transactions")
+
+            for txn in transactions:
+                cid = txn.get("contract_id")
+                if cid is None:
+                    continue
+                cid = int(cid)
+                if cid not in open_positions or cid in closed_ids:
+                    continue
+                action = txn.get("action_type", "")
+                logger.debug(f"Statement txn for open contract {cid}: action={action} txn={txn}")
+                if action in ("sell", "payout"):
+                    trade = open_positions[cid]
+                    buy_price = float(trade.get("buy_price", trade.get("stake", 0)))
+                    payout = float(txn.get("amount", 0))
+                    profit = round(payout - buy_price, 2)
+                    self.risk.close_trade(cid, payout, profit)
+                    closed_ids.add(cid)
+                    try:
+                        balance_info = await self.client.get_balance()
+                        self._balance = float(balance_info.get("balance", self._balance))
+                        self.risk.update_balance(self._balance)
+                    except Exception as e:
+                        logger.warning(f"Balance refresh failed: {e}")
+        except Exception as e:
+            logger.warning(f"Statement check failed: {e}")
+
+        # --- Fallback: proposal_open_contract poll ---
+        remaining = {cid: pos for cid, pos in open_positions.items() if cid not in closed_ids}
+        for contract_id in remaining:
             try:
                 details = await self.client.get_contract(contract_id)
                 status = details.get("status")
-
+                logger.debug(f"Contract {contract_id} poll: status={status} keys={list(details.keys())}")
                 if status in ("won", "lost", "sold"):
                     sell_price = float(details.get("sell_price", 0))
                     profit = float(details.get("profit", 0))
                     self.risk.close_trade(contract_id, sell_price, profit)
-
-                    # Update balance
-                    balance_info = await self.client.get_balance()
-                    self._balance = float(balance_info.get("balance", self._balance))
-                    self.risk.update_balance(self._balance)
-
+                    try:
+                        balance_info = await self.client.get_balance()
+                        self._balance = float(balance_info.get("balance", self._balance))
+                        self.risk.update_balance(self._balance)
+                    except Exception as e:
+                        logger.warning(f"Balance refresh failed: {e}")
             except Exception as e:
-                logger.warning(f"Could not check contract {contract_id}: {e}")
+                logger.warning(f"Contract poll failed for {contract_id}: {e}")
 
     def _print_status(self) -> None:
         """Print a status summary."""
