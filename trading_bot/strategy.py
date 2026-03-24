@@ -135,14 +135,14 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
     reasons = []
 
     # === BUY Signal (CALL) ===
-    if rsi is not None and rsi < 35:
+    if rsi is not None and rsi < 40:
         confidence += 0.35
         reasons.append(f"RSI oversold ({rsi:.1f})")
 
     if current_price < bb_lower:
         confidence += 0.30
         reasons.append("Price below lower Bollinger Band")
-    elif current_price < bb_mid and rsi < 40:
+    elif current_price < bb_mid and rsi < 45:
         confidence += 0.15
         reasons.append("Price below BB midline + low RSI")
 
@@ -156,7 +156,7 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
         confidence += 0.15
         reasons.append("EMA10 > EMA20 (momentum up)")
 
-    if confidence >= 0.60:
+    if confidence >= 0.55:
         return TradeSignal(
             Signal.BUY,
             min(confidence, 0.95),
@@ -168,14 +168,14 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
     confidence = 0.0
     reasons = []
 
-    if rsi is not None and rsi > 65:
+    if rsi is not None and rsi > 60:
         confidence += 0.35
         reasons.append(f"RSI overbought ({rsi:.1f})")
 
     if current_price > bb_upper:
         confidence += 0.30
         reasons.append("Price above upper Bollinger Band")
-    elif current_price > bb_mid and rsi > 60:
+    elif current_price > bb_mid and rsi > 55:
         confidence += 0.15
         reasons.append("Price above BB midline + high RSI")
 
@@ -189,7 +189,7 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
         confidence += 0.15
         reasons.append("EMA10 < EMA20 (momentum down)")
 
-    if confidence >= 0.60:
+    if confidence >= 0.55:
         return TradeSignal(
             Signal.SELL,
             min(confidence, 0.95),
