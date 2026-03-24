@@ -38,6 +38,8 @@ coverage/
 skills/custom/*
 logs/
 log/
+trading_bot/data/
+data/
 
 # Local git hooks (keep only on this machine, do not push)
 .githooks/
