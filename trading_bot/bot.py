@@ -84,6 +84,29 @@ class TradingBot:
         self._running = False
         await self.client.disconnect()
 
+    async def _on_contract_update(self, msg: dict) -> None:
+        """Handle real-time contract settlement notifications."""
+        data = msg.get("proposal_open_contract", {})
+        contract_id = data.get("contract_id")
+        status = data.get("status")
+
+        if not contract_id or status not in ("won", "lost", "sold"):
+            return
+
+        if contract_id not in self.risk.get_open_positions():
+            return
+
+        sell_price = float(data.get("sell_price", 0))
+        profit = float(data.get("profit", 0))
+        self.risk.close_trade(contract_id, sell_price, profit)
+
+        try:
+            balance_info = await self.client.get_balance()
+            self._balance = float(balance_info.get("balance", self._balance))
+            self.risk.update_balance(self._balance)
+        except Exception as e:
+            logger.warning(f"Balance refresh failed after contract close: {e}")
+
     async def _connect_and_run(self) -> None:
         """Connect to Deriv and run the main trading loop."""
         await self.client.connect()
@@ -94,6 +117,7 @@ class TradingBot:
                 "Get your API token from https://app.deriv.com/account/api-token"
             )
 
+        self.client.on("proposal_open_contract", self._on_contract_update)
         await self.client.authorize()
         balance_info = await self.client.get_balance()
         self._balance = float(balance_info.get("balance", self.config.starting_balance))
@@ -164,7 +188,7 @@ class TradingBot:
         )
 
         # 5. Execute trade if signal is strong enough
-        if signal.signal == Signal.HOLD or signal.confidence < 0.60:
+        if signal.signal == Signal.HOLD or signal.confidence < 0.55:
             return
 
         stake = self.risk.calculate_stake(self._balance)
@@ -188,6 +212,12 @@ class TradingBot:
                 payout=float(contract.get("payout", 0)),
                 buy_price=float(contract.get("buy_price", stake)),
             )
+
+            # Subscribe to real-time settlement updates
+            try:
+                await self.client.subscribe_contract_updates(contract["contract_id"])
+            except Exception as e:
+                logger.warning(f"Contract subscription failed, will fall back to polling: {e}")
 
         except Exception as e:
             logger.error(f"Failed to place trade: {e}")

@@ -301,3 +301,16 @@ class DerivClient:
             "contract_id": contract_id,
         })
         return resp.get("proposal_open_contract", {})
+
+    async def subscribe_contract_updates(self, contract_id: int) -> None:
+        """Subscribe to real-time status updates for an open contract."""
+        resp = await self.send({
+            "proposal_open_contract": 1,
+            "contract_id": contract_id,
+            "subscribe": 1,
+        })
+        if "error" in resp:
+            logger.warning(
+                f"Contract subscription failed for {contract_id}: "
+                f"{resp.get('error', {}).get('message', resp)}"
+            )
