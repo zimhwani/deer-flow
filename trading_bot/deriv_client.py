@@ -46,7 +46,7 @@ class DerivClient:
             "Deriv-App-ID": self.app_id,
         }
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers) as resp:
+            async with session.post(url, json={}, headers=headers) as resp:
                 text = await resp.text()
                 logger.debug(f"OTP response ({resp.status}): {text[:300]}")
                 if resp.status != 200:

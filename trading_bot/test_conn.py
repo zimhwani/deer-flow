@@ -46,6 +46,7 @@ async def main():
     async with aiohttp.ClientSession() as session:
         async with session.post(
             otp_url,
+            json={},
             headers={
                 "Authorization": f"Bearer {token}",
                 "Deriv-App-ID": app_id,
