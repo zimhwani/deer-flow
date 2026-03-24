@@ -74,7 +74,8 @@ class RiskManager:
         state = {
             "date": str(date.today()),
             "daily_pnl": self._daily_pnl,
-            "trade_log": self._trade_log[-100:],  # Keep last 100 trades
+            "trade_log": self._trade_log[-100:],
+            "open_positions": list(self._open_positions.values()),
         }
         with open(self._state_path(), "w") as f:
             json.dump(state, f, indent=2)
@@ -144,6 +145,7 @@ class RiskManager:
             "buy_price": buy_price,
             "opened_at": datetime.utcnow().isoformat(),
         }
+        self._save_state()
         logger.info(
             f"Trade registered #{contract_id} | {contract_type} {symbol} | "
             f"Stake: {stake:.2f} | Payout: {payout:.2f}"

@@ -50,6 +50,7 @@ def _read_state() -> dict:
 async def api_stats(request):
     state = _read_state()
     trades = state.get("trade_log", [])
+    open_positions = state.get("open_positions", [])
     wins = [t for t in trades if t.get("profit", 0) > 0]
     losses = [t for t in trades if t.get("profit", 0) <= 0]
     total_profit = sum(t.get("profit", 0) for t in trades)
@@ -71,6 +72,7 @@ async def api_stats(request):
         "total_profit": round(total_profit, 2),
         "equity_curve": equity,
         "recent_trades": trades[-20:][::-1],
+        "open_positions": open_positions,
     }
     return web.json_response(payload)
 
@@ -497,6 +499,14 @@ HTML = """<!DOCTYPE html>
   </div>
 </div>
 
+<!-- Open positions banner -->
+<div id="open-positions-bar" style="display:none; margin: 14px 28px 0; background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.25); border-radius: 12px; padding: 12px 20px;">
+  <div style="font-size:11px; font-weight:600; color:var(--blue); text-transform:uppercase; letter-spacing:0.8px; margin-bottom:8px;">
+    ⚡ Open Positions
+  </div>
+  <div id="open-positions-list" style="display:flex; flex-wrap:wrap; gap:10px;"></div>
+</div>
+
 <div class="bottom-row">
   <div class="panel">
     <div class="panel-header">
@@ -703,6 +713,26 @@ async function fetchStats() {
       donutChart.update('none');
     }
     document.getElementById('donut-badge').textContent = wins + 'W / ' + losses + 'L';
+
+    // Open positions banner
+    const openPos = d.open_positions ?? [];
+    const bar = document.getElementById('open-positions-bar');
+    const list = document.getElementById('open-positions-list');
+    if (openPos.length > 0) {
+      bar.style.display = 'block';
+      list.innerHTML = openPos.map(p => {
+        const dir = p.contract_type === 'CALL' ? 'call' : 'put';
+        const dirLabel = p.contract_type === 'CALL' ? '▲ CALL' : '▼ PUT';
+        return `<div style="background:var(--surface);border:1px solid var(--border2);border-radius:8px;padding:8px 14px;font-size:12px;font-family:'JetBrains Mono',monospace;">
+          <span class="tag ${dir}" style="margin-right:8px;">${dirLabel}</span>
+          <span style="color:var(--muted);">Stake:</span> <span style="color:var(--text);">${(p.stake??0).toFixed(2)}</span>
+          <span style="color:var(--muted);margin-left:10px;">Payout:</span> <span style="color:var(--cyan);">${(p.payout??0).toFixed(2)}</span>
+          <span style="color:var(--muted);margin-left:10px;">Opened:</span> <span style="color:var(--text);">${fmtTime(p.opened_at)}</span>
+        </div>`;
+      }).join('');
+    } else {
+      bar.style.display = 'none';
+    }
 
     // Recent trades table
     const tbody = document.getElementById('trades-body');
