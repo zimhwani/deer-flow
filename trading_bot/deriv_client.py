@@ -239,20 +239,23 @@ class DerivClient:
         duration_unit: str,
         amount: float,
         basis: str = "stake",
+        currency: str = "",
     ) -> Dict[str, Any]:
         """
         Buy a contract (open a position).
 
         contract_type: CALL (up) or PUT (down)
         basis: 'stake' (amount you pay) or 'payout' (amount you receive if win)
+        currency: account currency; falls back to account_info if not supplied
         """
+        trade_currency = currency or self.account_info.get("currency", "USD")
         # First get a price proposal
         proposal = await self.send({
             "proposal": 1,
             "amount": amount,
             "basis": basis,
             "contract_type": contract_type,
-            "currency": "AUD",
+            "currency": trade_currency,
             "duration": duration,
             "duration_unit": duration_unit,
             "underlying_symbol": symbol,
@@ -266,8 +269,8 @@ class DerivClient:
         ask_price = proposal["proposal"].get("ask_price", amount)
 
         logger.info(
-            f"Proposal: {contract_type} {symbol} | Stake: {ask_price:.2f} AUD | "
-            f"Payout: {payout:.2f} AUD | Duration: {duration}{duration_unit}"
+            f"Proposal: {contract_type} {symbol} | Stake: {ask_price:.2f} {trade_currency} | "
+            f"Payout: {payout:.2f} {trade_currency} | Duration: {duration}{duration_unit}"
         )
 
         # Buy the proposal

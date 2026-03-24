@@ -94,13 +94,14 @@ class RiskManager:
     def calculate_stake(self, balance: float) -> float:
         """
         Calculate the stake size for a new trade.
-        Stakes between 1% and 2% of current balance.
+        Stakes 1.5% of starting_balance (not live balance) so the stake stays
+        proportional to the original risk budget even if the account has grown.
         Minimum stake: $0.35 (Deriv minimum)
-        Maximum stake: 2% of balance
+        Maximum stake: max_risk_per_trade_pct% of starting_balance
         """
-        max_stake = balance * (self.max_risk_per_trade_pct / 100)
-        # Use 1.5% as default (between min and max)
-        stake = balance * 0.015
+        ref = self.starting_balance
+        max_stake = ref * (self.max_risk_per_trade_pct / 100)
+        stake = ref * 0.015
         stake = min(stake, max_stake)
         stake = max(stake, 0.35)  # Deriv minimum stake
         return round(stake, 2)
