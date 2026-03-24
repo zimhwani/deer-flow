@@ -577,9 +577,13 @@ HTML = """<!DOCTYPE html>
 let equityChart = null;
 let donutChart = null;
 
+function num(val, decimals=2) {
+  return Math.abs(val).toLocaleString('en-US', {minimumFractionDigits: decimals, maximumFractionDigits: decimals});
+}
+
 function fmt(val, decimals=2) {
-  const sign = val >= 0 ? '+' : '';
-  return sign + val.toFixed(decimals);
+  const sign = val >= 0 ? '+' : '-';
+  return sign + num(val, decimals);
 }
 
 function fmtTime(iso) {
@@ -613,7 +617,7 @@ async function fetchStats() {
     // Cards
     const balEl = document.getElementById('account-balance');
     if (bal > 0) {
-      balEl.textContent = '$' + bal.toFixed(2);
+      balEl.textContent = '$' + num(bal);
     }
 
     const pnlEl = document.getElementById('daily-pnl');
@@ -786,10 +790,10 @@ async function fetchStats() {
       if (dd > maxDD) maxDD = dd;
     });
 
-    perfRow('pr-avg-win',      'Avg Win',          closedWins.length  ? '+' + avgWin.toFixed(2) + ' USD' : '—',  'green');
-    perfRow('pr-avg-loss',     'Avg Loss',         closedLoss.length  ? avgLoss.toFixed(2) + ' USD'        : '—',  'red');
-    perfRow('pr-profit-factor','Profit Factor',    pf,                                                           'cyan');
-    perfRow('pr-max-dd',       'Max Drawdown',     maxDD > 0 ? '-' + maxDD.toFixed(2) + ' USD' : '—',           'yellow');
+    perfRow('pr-avg-win',      'Avg Win',          closedWins.length  ? '+' + num(avgWin) + ' USD' : '—',  'green');
+    perfRow('pr-avg-loss',     'Avg Loss',         closedLoss.length  ? '-' + num(Math.abs(avgLoss)) + ' USD' : '—',  'red');
+    perfRow('pr-profit-factor','Profit Factor',    pf,                                                       'cyan');
+    perfRow('pr-max-dd',       'Max Drawdown',     maxDD > 0 ? '-' + num(maxDD) + ' USD' : '—',             'yellow');
 
     // Live indicator
     document.getElementById('live-badge').className = 'live-badge';
