@@ -114,10 +114,6 @@ class RiskManager:
         if self._daily_pnl <= -loss_limit:
             return False, f"Daily loss limit reached ({self._daily_pnl:.2f} AUD). Stopping for today."
 
-        # Max open positions
-        if len(self._open_positions) >= self.max_open_positions:
-            return False, f"Max open positions reached ({len(self._open_positions)}/{self.max_open_positions})"
-
         # Minimum balance check
         if balance < 1.0:
             return False, f"Balance too low: {balance:.2f} AUD"
