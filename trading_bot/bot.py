@@ -1,0 +1,261 @@
+"""
+Deriv.com Trading Bot - Main Orchestrator
+Runs 24/7, opening and closing positions based on strategy signals.
+"""
+
+import asyncio
+import logging
+import signal
+import sys
+from datetime import datetime
+from typing import Optional
+
+from .config import TradingConfig, load_config
+from .deriv_client import DerivClient
+from .risk_manager import RiskManager
+from .strategy import Signal, generate_signal
+
+logger = logging.getLogger(__name__)
+
+
+class TradingBot:
+    """
+    Main trading bot that:
+    1. Connects to Deriv.com API
+    2. Fetches market data on each cycle
+    3. Runs strategy analysis
+    4. Opens/closes positions based on signals + risk rules
+    5. Reconnects automatically on disconnection
+    """
+
+    def __init__(self, config: TradingConfig):
+        self.config = config
+        self.client = DerivClient(
+            api_token=config.api_token,
+            app_id=config.app_id,
+            ws_url=config.ws_url,
+        )
+        self.risk = RiskManager(
+            starting_balance=config.starting_balance,
+            max_risk_per_trade_pct=config.max_risk_per_trade_pct,
+            max_daily_loss_pct=config.max_daily_loss_pct,
+            max_open_positions=config.max_open_positions,
+            daily_profit_target_pct=config.daily_profit_target_pct,
+            data_dir=config.data_dir,
+        )
+        self._running = False
+        self._balance: float = config.starting_balance
+        self._cycle_count: int = 0
+
+    async def start(self) -> None:
+        """Start the bot with automatic reconnection."""
+        self._running = True
+        reconnect_attempts = 0
+
+        logger.info("=" * 60)
+        logger.info("  Deriv.com Trading Bot Starting")
+        logger.info(f"  Symbol:    {self.config.symbol}")
+        logger.info(f"  Currency:  {self.config.currency}")
+        logger.info(f"  Max risk:  {self.config.max_risk_per_trade_pct}% per trade")
+        logger.info(f"  Interval:  {self.config.polling_interval_seconds}s")
+        logger.info("=" * 60)
+
+        while self._running:
+            try:
+                await self._connect_and_run()
+                reconnect_attempts = 0
+            except Exception as e:
+                if not self._running:
+                    break
+                reconnect_attempts += 1
+                if reconnect_attempts > self.config.max_reconnect_attempts:
+                    logger.error("Max reconnect attempts reached. Stopping bot.")
+                    break
+                delay = min(self.config.reconnect_delay_seconds * (2 ** min(reconnect_attempts, 5)), 300)
+                logger.warning(
+                    f"Connection error: {e}. "
+                    f"Reconnecting in {delay:.0f}s (attempt {reconnect_attempts})"
+                )
+                await asyncio.sleep(delay)
+
+    async def stop(self) -> None:
+        """Gracefully stop the bot."""
+        logger.info("Stopping trading bot...")
+        self._running = False
+        await self.client.disconnect()
+
+    async def _connect_and_run(self) -> None:
+        """Connect to Deriv and run the main trading loop."""
+        await self.client.connect()
+
+        if not self.config.api_token:
+            raise ValueError(
+                "DERIV_API_TOKEN is not set. "
+                "Get your API token from https://app.deriv.com/account/api-token"
+            )
+
+        await self.client.authorize()
+        balance_info = await self.client.get_balance()
+        self._balance = float(balance_info.get("balance", self.config.starting_balance))
+        logger.info(f"Account balance: {self._balance:.2f} {self.config.currency}")
+
+        # Start the main loop
+        await self._trading_loop()
+
+    async def _trading_loop(self) -> None:
+        """Main trading loop - runs continuously."""
+        logger.info("Entering trading loop...")
+
+        while self._running and self.client.is_authorized:
+            self._cycle_count += 1
+            cycle_start = datetime.utcnow()
+
+            try:
+                await self._run_cycle()
+            except Exception as e:
+                logger.error(f"Cycle {self._cycle_count} error: {e}", exc_info=True)
+
+            # Refresh balance periodically
+            if self._cycle_count % 5 == 0:
+                try:
+                    balance_info = await self.client.get_balance()
+                    self._balance = float(balance_info.get("balance", self._balance))
+                except Exception as e:
+                    logger.warning(f"Balance refresh failed: {e}")
+
+            # Print status every 10 cycles
+            if self._cycle_count % 10 == 0:
+                self._print_status()
+
+            # Wait for next cycle
+            elapsed = (datetime.utcnow() - cycle_start).total_seconds()
+            wait = max(0, self.config.polling_interval_seconds - elapsed)
+            await asyncio.sleep(wait)
+
+    async def _run_cycle(self) -> None:
+        """Single analysis and trade cycle."""
+        # 1. Check if trading is permitted
+        can_trade, reason = self.risk.can_trade(self._balance)
+        if not can_trade:
+            logger.info(f"Cycle {self._cycle_count}: Skipping - {reason}")
+            return
+
+        # 2. Check open positions for expired/closed contracts
+        await self._check_open_positions()
+
+        # 3. Fetch market data (5-minute candles, last 50)
+        candles = await self.client.get_candles(
+            symbol=self.config.symbol,
+            granularity=300,   # 5-minute candles
+            count=50,
+        )
+
+        if len(candles) < 30:
+            logger.info(f"Cycle {self._cycle_count}: Insufficient candle data ({len(candles)})")
+            return
+
+        # 4. Generate signal
+        signal = generate_signal(candles, self.config.symbol)
+        logger.info(
+            f"Cycle {self._cycle_count}: Signal={signal.signal.name} "
+            f"Confidence={signal.confidence:.0%} | {signal.reason}"
+        )
+
+        # 5. Execute trade if signal is strong enough
+        if signal.signal == Signal.HOLD or signal.confidence < 0.60:
+            return
+
+        stake = self.risk.calculate_stake(self._balance)
+        logger.info(f"Placing {signal.signal.name} trade | Stake: {stake:.2f} AUD")
+
+        try:
+            contract = await self.client.buy_contract(
+                symbol=self.config.symbol,
+                contract_type=signal.signal.value,
+                duration=self.config.duration,
+                duration_unit=self.config.duration_unit,
+                amount=stake,
+            )
+
+            self.risk.register_trade(
+                contract_id=contract["contract_id"],
+                contract_type=signal.signal.value,
+                symbol=self.config.symbol,
+                stake=stake,
+                payout=float(contract.get("payout", 0)),
+                buy_price=float(contract.get("buy_price", stake)),
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to place trade: {e}")
+
+    async def _check_open_positions(self) -> None:
+        """Poll open positions to detect settled contracts."""
+        open_positions = self.risk.get_open_positions()
+        if not open_positions:
+            return
+
+        for contract_id in list(open_positions.keys()):
+            try:
+                details = await self.client.get_contract(contract_id)
+                status = details.get("status")
+
+                if status in ("won", "lost", "sold"):
+                    sell_price = float(details.get("sell_price", 0))
+                    profit = float(details.get("profit", 0))
+                    self.risk.close_trade(contract_id, sell_price, profit)
+
+                    # Update balance
+                    balance_info = await self.client.get_balance()
+                    self._balance = float(balance_info.get("balance", self._balance))
+
+            except Exception as e:
+                logger.warning(f"Could not check contract {contract_id}: {e}")
+
+    def _print_status(self) -> None:
+        """Print a status summary."""
+        stats = self.risk.get_stats()
+        logger.info(
+            f"\n{'─'*50}\n"
+            f"  Balance:      {self._balance:.2f} AUD\n"
+            f"  Daily P&L:    {stats['daily_pnl_aud']:+.2f} AUD\n"
+            f"  Total Trades: {stats['total_trades']} "
+            f"(W:{stats['wins']} / L:{stats['losses']} | {stats['win_rate_pct']:.0f}%)\n"
+            f"  Open:         {stats['open_positions']}/{self.config.max_open_positions}\n"
+            f"{'─'*50}"
+        )
+
+
+async def main(config_path: Optional[str] = None) -> None:
+    """Entry point for the trading bot."""
+    config = load_config(config_path)
+
+    # Set up logging
+    log_level = getattr(logging, config.log_level.upper(), logging.INFO)
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler(
+                f"{config.data_dir}/bot.log",
+                mode="a",
+                encoding="utf-8",
+            ) if config.data_dir else logging.StreamHandler(),
+        ],
+    )
+
+    bot = TradingBot(config)
+
+    # Handle graceful shutdown
+    loop = asyncio.get_event_loop()
+
+    def _shutdown(sig):
+        logger.info(f"Received {sig.name}. Shutting down...")
+        loop.create_task(bot.stop())
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, _shutdown, sig)
+
+    await bot.start()
+    logger.info("Bot stopped.")

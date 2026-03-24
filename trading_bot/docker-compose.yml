@@ -1,0 +1,37 @@
+version: "3.9"
+
+services:
+  trading-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: deriv-trading-bot
+    restart: unless-stopped          # Auto-restart if it crashes
+    environment:
+      # ─── REQUIRED ────────────────────────────────────────────
+      - DERIV_API_TOKEN=${DERIV_API_TOKEN}
+
+      # ─── OPTIONAL OVERRIDES ──────────────────────────────────
+      - DERIV_APP_ID=${DERIV_APP_ID:-1089}
+      - TRADING_CURRENCY=${TRADING_CURRENCY:-AUD}
+      - TRADING_STARTING_BALANCE=${TRADING_STARTING_BALANCE:-100.0}
+      - TRADING_SYMBOL=${TRADING_SYMBOL:-R_10}
+      - TRADING_DURATION=${TRADING_DURATION:-5}
+      - TRADING_MAX_RISK_PCT=${TRADING_MAX_RISK_PCT:-2.0}
+      - TRADING_MAX_DAILY_LOSS_PCT=${TRADING_MAX_DAILY_LOSS_PCT:-10.0}
+      - TRADING_DAILY_TARGET_PCT=${TRADING_DAILY_TARGET_PCT:-3.0}
+      - TRADING_LOG_LEVEL=${TRADING_LOG_LEVEL:-INFO}
+      - TRADING_DATA_DIR=/app/data
+
+    volumes:
+      - trading_data:/app/data        # Persist trade logs and state
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  trading_data:
+    driver: local
