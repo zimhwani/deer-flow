@@ -40,23 +40,37 @@ class DerivClient:
     async def _get_otp_url(self) -> str:
         """Call REST API to get an authenticated WebSocket URL (OTP)."""
         url = f"{_REST_BASE}/trading/v1/options/accounts/{self.account_id}/otp"
+        logger.debug(f"OTP request: POST {url}")
         headers = {
             "Authorization": f"Bearer {self.api_token}",
             "Deriv-App-ID": self.app_id,
         }
         async with aiohttp.ClientSession() as session:
             async with session.post(url, headers=headers) as resp:
+                text = await resp.text()
+                logger.debug(f"OTP response ({resp.status}): {text[:300]}")
                 if resp.status != 200:
-                    text = await resp.text()
-                    raise RuntimeError(f"OTP request failed ({resp.status}): {text}")
-                data = await resp.json()
-                return data["data"]["url"]
+                    raise RuntimeError(
+                        f"OTP request failed (HTTP {resp.status}) for account "
+                        f"'{self.account_id}' with app '{self.app_id}': {text}"
+                    )
+                try:
+                    data = json.loads(text)
+                    ws_url = data["data"]["url"]
+                except (KeyError, json.JSONDecodeError) as e:
+                    raise RuntimeError(
+                        f"Unexpected OTP response format: {e} — body: {text[:300]}"
+                    )
+                return ws_url
 
     async def connect(self) -> None:
         """Establish WebSocket connection via OTP-authenticated URL."""
         logger.info("Requesting authenticated WebSocket URL...")
         ws_url = await self._get_otp_url()
-        logger.info("Connecting to Deriv API...")
+        # Log the host only (strip the OTP token from the URL for security)
+        from urllib.parse import urlparse
+        parsed = urlparse(ws_url)
+        logger.info(f"Connecting to Deriv API ({parsed.scheme}://{parsed.netloc}{parsed.path})...")
         self.ws = await websockets.connect(
             ws_url,
             ping_interval=30,
