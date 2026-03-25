@@ -142,6 +142,9 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
         if rsi is not None and rsi < 40:
             buy_confidence += 0.20
             buy_reasons.append(f"RSI oversold ({rsi:.1f})")
+        if rsi is not None and rsi < 30:
+            buy_confidence += 0.10
+            buy_reasons.append(f"RSI strongly oversold ({rsi:.1f})")
     elif current_price < bb_mid and rsi is not None and rsi < 35:
         buy_confidence += 0.25
         buy_reasons.append(f"Below BB mid + RSI very oversold ({rsi:.1f})")
@@ -179,6 +182,9 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
         if rsi is not None and rsi > 60:
             sell_confidence += 0.20
             sell_reasons.append(f"RSI overbought ({rsi:.1f})")
+        if rsi is not None and rsi > 70:
+            sell_confidence += 0.10
+            sell_reasons.append(f"RSI strongly overbought ({rsi:.1f})")
     elif current_price > bb_mid and rsi is not None and rsi > 65:
         sell_confidence += 0.25
         sell_reasons.append(f"Above BB mid + RSI very overbought ({rsi:.1f})")
