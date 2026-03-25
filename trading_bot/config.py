@@ -41,7 +41,7 @@ class TradingConfig:
     reconnect_delay_seconds: float = 5.0
     max_reconnect_attempts: int = 20
     log_level: str = "INFO"
-    data_dir: str = "./data"
+    data_dir: str = ""  # resolved in load_config if empty
 
 
 def load_config(config_path: Optional[str] = None) -> TradingConfig:
@@ -82,5 +82,9 @@ def load_config(config_path: Optional[str] = None) -> TradingConfig:
                 setattr(cfg, attr, int(val))
             else:
                 setattr(cfg, attr, val)
+
+    # Resolve data_dir to an absolute path relative to this file if not set
+    if not cfg.data_dir:
+        cfg.data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
     return cfg
