@@ -131,65 +131,77 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
     trend_up = ema20 > ema20_prev if ema20_prev is not None else False
     trend_down = ema20 < ema20_prev if ema20_prev is not None else False
 
-    confidence = 0.0
-    reasons = []
-
     # === BUY Signal (CALL) ===
-    # Require Bollinger Band confirmation — RSI alone is not enough
+    buy_confidence = 0.0
+    buy_reasons = []
+
+    # Bollinger Band conditions (strong signals)
     if current_price < bb_lower:
-        confidence += 0.35
-        reasons.append("Price below lower Bollinger Band")
+        buy_confidence += 0.30
+        buy_reasons.append("Price below lower BB")
         if rsi is not None and rsi < 40:
-            confidence += 0.25
-            reasons.append(f"RSI oversold ({rsi:.1f})")
+            buy_confidence += 0.20
+            buy_reasons.append(f"RSI oversold ({rsi:.1f})")
     elif current_price < bb_mid and rsi is not None and rsi < 35:
-        confidence += 0.30
-        reasons.append(f"Price below BB midline + RSI very oversold ({rsi:.1f})")
+        buy_confidence += 0.25
+        buy_reasons.append(f"Below BB mid + RSI very oversold ({rsi:.1f})")
+
+    # EMA crossover (works independently of BB)
+    if ema10 > ema20:
+        buy_confidence += 0.25
+        buy_reasons.append("EMA10 > EMA20 crossover")
 
     if trend_up:
-        confidence += 0.20
-        reasons.append("EMA trend: bullish")
+        buy_confidence += 0.20
+        buy_reasons.append("EMA trend: bullish")
 
-    if ema10 > ema20 and trend_up:
-        confidence += 0.15
-        reasons.append("EMA10 > EMA20 (momentum up)")
+    # RSI momentum support (mild boost when directionally aligned)
+    if rsi is not None and 50 < rsi < 70 and trend_up:
+        buy_confidence += 0.10
+        buy_reasons.append(f"RSI bullish ({rsi:.1f})")
 
-    if confidence >= 0.55:
+    if buy_confidence >= 0.55:
         return TradeSignal(
             Signal.BUY,
-            min(confidence, 0.95),
-            " | ".join(reasons),
+            min(buy_confidence, 0.95),
+            " | ".join(buy_reasons),
             symbol,
         )
 
     # === SELL Signal (PUT) ===
-    confidence = 0.0
-    reasons = []
+    sell_confidence = 0.0
+    sell_reasons = []
 
-    # Require Bollinger Band confirmation — RSI alone is not enough
+    # Bollinger Band conditions (strong signals)
     if current_price > bb_upper:
-        confidence += 0.35
-        reasons.append("Price above upper Bollinger Band")
+        sell_confidence += 0.30
+        sell_reasons.append("Price above upper BB")
         if rsi is not None and rsi > 60:
-            confidence += 0.25
-            reasons.append(f"RSI overbought ({rsi:.1f})")
+            sell_confidence += 0.20
+            sell_reasons.append(f"RSI overbought ({rsi:.1f})")
     elif current_price > bb_mid and rsi is not None and rsi > 65:
-        confidence += 0.30
-        reasons.append(f"Price above BB midline + RSI very overbought ({rsi:.1f})")
+        sell_confidence += 0.25
+        sell_reasons.append(f"Above BB mid + RSI very overbought ({rsi:.1f})")
+
+    # EMA crossover (works independently of BB)
+    if ema10 < ema20:
+        sell_confidence += 0.25
+        sell_reasons.append("EMA10 < EMA20 crossover")
 
     if trend_down:
-        confidence += 0.20
-        reasons.append("EMA trend: bearish")
+        sell_confidence += 0.20
+        sell_reasons.append("EMA trend: bearish")
 
-    if ema10 < ema20 and trend_down:
-        confidence += 0.15
-        reasons.append("EMA10 < EMA20 (momentum down)")
+    # RSI momentum support (mild boost when directionally aligned)
+    if rsi is not None and 30 < rsi < 50 and trend_down:
+        sell_confidence += 0.10
+        sell_reasons.append(f"RSI bearish ({rsi:.1f})")
 
-    if confidence >= 0.55:
+    if sell_confidence >= 0.55:
         return TradeSignal(
             Signal.SELL,
-            min(confidence, 0.95),
-            " | ".join(reasons),
+            min(sell_confidence, 0.95),
+            " | ".join(sell_reasons),
             symbol,
         )
 
