@@ -196,7 +196,7 @@ class TradingBot:
         )
 
         # 5. Execute trade if signal is strong enough
-        if signal.signal == Signal.HOLD or signal.confidence < 0.65:
+        if signal.signal == Signal.HOLD or signal.confidence < 0.55:
             return
 
         # 6. Consecutive loss cooldown — skip 2 cycles after 2 losses in a row
