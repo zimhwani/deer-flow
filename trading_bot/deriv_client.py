@@ -302,6 +302,11 @@ class DerivClient:
         })
         return resp.get("proposal_open_contract", {})
 
+    async def get_profit_table(self, limit: int = 50) -> Dict[str, Any]:
+        """Get settled/closed contract history."""
+        resp = await self.send({"profit_table": 1, "limit": limit, "sort": "DESC"})
+        return resp.get("profit_table", {})
+
     async def subscribe_contract_updates(self, contract_id: int) -> None:
         """Subscribe to real-time status updates for an open contract."""
         resp = await self.send({

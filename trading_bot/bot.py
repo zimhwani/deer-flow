@@ -261,7 +261,34 @@ class TradingBot:
         except Exception as e:
             logger.warning(f"Statement check failed: {e}")
 
-        # --- Fallback: proposal_open_contract poll ---
+        # --- Fallback 1: profit_table (covers expired contracts) ---
+        remaining = {cid: pos for cid, pos in open_positions.items() if cid not in closed_ids}
+        if remaining:
+            try:
+                profit_table = await self.client.get_profit_table(limit=50)
+                for txn in profit_table.get("transactions", []):
+                    cid = txn.get("contract_id")
+                    if cid is None:
+                        continue
+                    cid = int(cid)
+                    if cid not in remaining:
+                        continue
+                    buy_price = float(txn.get("buy_price", 0))
+                    sell_price = float(txn.get("sell_price", 0))
+                    profit = round(sell_price - buy_price, 2)
+                    self.risk.close_trade(cid, sell_price, profit)
+                    closed_ids.add(cid)
+                    logger.info(f"Contract {cid} closed via profit_table | profit={profit:+.2f}")
+                    try:
+                        balance_info = await self.client.get_balance()
+                        self._balance = float(balance_info.get("balance", self._balance))
+                        self.risk.update_balance(self._balance)
+                    except Exception as e:
+                        logger.warning(f"Balance refresh failed: {e}")
+            except Exception as e:
+                logger.warning(f"Profit table check failed: {e}")
+
+        # --- Fallback 2: proposal_open_contract poll (for very recently expired) ---
         remaining = {cid: pos for cid, pos in open_positions.items() if cid not in closed_ids}
         for contract_id in remaining:
             try:
