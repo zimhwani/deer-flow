@@ -27,7 +27,7 @@ class TradingConfig:
     risk_reward_ratio: float = 2.0          # Target 1:2 risk/reward
 
     # Strategy settings
-    symbol: str = "R_10"                    # Volatility 10 Index (low volatility synthetic)
+    symbol: str = "R_25"                    # Volatility 25 Index (medium volatility synthetic)
     contract_type: str = "CALL"             # CALL/PUT
     duration: int = 5                       # Contract duration in minutes
     duration_unit: str = "m"               # m=minutes, t=ticks, s=seconds, h=hours, d=days
