@@ -133,6 +133,12 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
     trend_up = ema20 > ema20_prev if ema20_prev is not None else False
     trend_down = ema20 < ema20_prev if ema20_prev is not None else False
 
+    # RSI momentum direction (3-candle lookback)
+    # Used to distinguish a genuine turning-point from persistent elevated/depressed RSI
+    rsi_prev = calculate_rsi(closes[:-3], period=14) if len(closes) > 17 else None
+    rsi_falling = rsi_prev is not None and rsi < rsi_prev  # momentum fading → supports SELL
+    rsi_rising  = rsi_prev is not None and rsi > rsi_prev  # momentum building → supports BUY
+
     # === BUY confidence (fully scored before comparing to SELL) ===
     buy_confidence = 0.0
     buy_reasons = []
@@ -147,7 +153,7 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
         if rsi < 30:
             buy_confidence += 0.10
             buy_reasons.append(f"RSI strongly oversold ({rsi:.1f})")
-    elif current_price < bb_mid and rsi < 35:
+    elif current_price < bb_mid and rsi < 35 and rsi_rising:
         buy_confidence += 0.25
         buy_reasons.append(f"Below BB mid + RSI very oversold ({rsi:.1f})")
 
@@ -161,8 +167,8 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
     if 50 < rsi < 70 and trend_up:
         buy_confidence += 0.10
         buy_reasons.append(f"RSI bullish ({rsi:.1f})")
-    # Pullback in uptrend: price below BB mid while overall trend is up
-    if trend_up and current_price < bb_mid and rsi < 50:
+    # Pullback in uptrend: price below BB mid while overall trend is up, RSI bouncing
+    if trend_up and current_price < bb_mid and rsi < 50 and rsi_rising:
         buy_confidence += 0.10
         buy_reasons.append("Pullback in uptrend")
 
@@ -180,7 +186,7 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
         if rsi > 70:
             sell_confidence += 0.10
             sell_reasons.append(f"RSI strongly overbought ({rsi:.1f})")
-    elif current_price > bb_mid and rsi > 65:
+    elif current_price > bb_mid and rsi > 65 and rsi_falling:
         sell_confidence += 0.25
         sell_reasons.append(f"Above BB mid + RSI very overbought ({rsi:.1f})")
 
@@ -194,8 +200,8 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
     if 30 < rsi < 50 and trend_down:
         sell_confidence += 0.10
         sell_reasons.append(f"RSI bearish ({rsi:.1f})")
-    # Spike in downtrend: price above BB mid while overall trend is down
-    if trend_down and current_price > bb_mid and rsi > 50:
+    # Spike in downtrend: price above BB mid while overall trend is down, RSI turning down
+    if trend_down and current_price > bb_mid and rsi > 50 and rsi_falling:
         sell_confidence += 0.10
         sell_reasons.append("Spike in downtrend")
 
