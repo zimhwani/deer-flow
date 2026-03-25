@@ -199,22 +199,30 @@ class TradingBot:
         if signal.signal == Signal.HOLD or signal.confidence < 0.55:
             return
 
-        # 6. Consecutive loss cooldown — skip 2 cycles after 2 losses in a row
+        # 6. Consecutive loss cooldown — skip N cycles after N consecutive losses
         consecutive_losses = self.risk.get_consecutive_losses()
         if consecutive_losses >= 2:
-            cooldown_cycles = consecutive_losses  # 2 losses → skip 2 cycles, 3 → skip 3, etc.
             if not hasattr(self, "_loss_cooldown_until"):
                 self._loss_cooldown_until = 0
+                self._last_cooldown_trigger_losses = 0
+
             if self._cycle_count <= self._loss_cooldown_until:
                 logger.info(
                     f"Cycle {self._cycle_count}: Loss cooldown active "
                     f"({consecutive_losses} consecutive losses, cooling until cycle {self._loss_cooldown_until})"
                 )
                 return
-            else:
+
+            if consecutive_losses != self._last_cooldown_trigger_losses:
+                cooldown_cycles = consecutive_losses
                 self._loss_cooldown_until = self._cycle_count + cooldown_cycles
-                logger.info(f"Cycle {self._cycle_count}: {consecutive_losses} consecutive losses — cooldown set for {cooldown_cycles} cycles")
+                self._last_cooldown_trigger_losses = consecutive_losses
+                logger.info(
+                    f"Cycle {self._cycle_count}: {consecutive_losses} consecutive losses — "
+                    f"cooldown set for {cooldown_cycles} cycles"
+                )
                 return
+            # Cooldown served for this loss streak — allow trade to proceed
 
         # 7. Minimum gap between trades — don't open if a trade was opened < 2 min ago
         last_trade_time = self.risk.get_last_trade_time()
