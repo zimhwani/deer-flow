@@ -161,6 +161,10 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
     if 50 < rsi < 70 and trend_up:
         buy_confidence += 0.10
         buy_reasons.append(f"RSI bullish ({rsi:.1f})")
+    # Pullback in uptrend: price below BB mid while overall trend is up
+    if trend_up and current_price < bb_mid and rsi < 50:
+        buy_confidence += 0.10
+        buy_reasons.append("Pullback in uptrend")
 
     # === SELL confidence (fully scored before comparing to BUY) ===
     sell_confidence = 0.0
@@ -190,6 +194,10 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
     if 30 < rsi < 50 and trend_down:
         sell_confidence += 0.10
         sell_reasons.append(f"RSI bearish ({rsi:.1f})")
+    # Spike in downtrend: price above BB mid while overall trend is down
+    if trend_down and current_price > bb_mid and rsi > 50:
+        sell_confidence += 0.10
+        sell_reasons.append("Spike in downtrend")
 
     # Return the stronger signal; both scored in full before deciding
     if buy_confidence >= 0.55 or sell_confidence >= 0.55:
