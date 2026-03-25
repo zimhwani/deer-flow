@@ -57,6 +57,18 @@ async def api_stats(request):
     total_profit = sum(t.get("profit", 0) for t in trades)
     win_rate = round(len(wins) / len(trades) * 100, 1) if trades else 0
 
+    calls = [t for t in trades if t.get("contract_type") == "CALL"]
+    puts  = [t for t in trades if t.get("contract_type") == "PUT"]
+    call_wins = len([t for t in calls if t.get("profit", 0) > 0])
+    put_wins  = len([t for t in puts  if t.get("profit", 0) > 0])
+
+    consecutive_losses = 0
+    for t in reversed(trades):
+        if t.get("profit", 0) < 0:
+            consecutive_losses += 1
+        else:
+            break
+
     equity = []
     running = 0.0
     for t in trades:
@@ -72,6 +84,11 @@ async def api_stats(request):
         "losses": len(losses),
         "win_rate": win_rate,
         "total_profit": round(total_profit, 2),
+        "call_count": len(calls),
+        "put_count": len(puts),
+        "call_wins": call_wins,
+        "put_wins": put_wins,
+        "consecutive_losses": consecutive_losses,
         "equity_curve": equity,
         "recent_trades": trades[-20:][::-1],
         "open_positions": open_positions,
@@ -394,6 +411,8 @@ HTML = """<!DOCTYPE html>
   .log-warn  { color: var(--yellow); }
   .log-error { color: var(--red); }
   .log-signal-hold  { color: #475569; }
+  .log-signal-score { color: #374151; }
+  .log-signal-score .score-val { color: #6b7280; }
   .log-signal-buy   { color: var(--green); font-weight: 500; }
   .log-signal-sell  { color: var(--red); font-weight: 500; }
 
@@ -434,7 +453,7 @@ HTML = """<!DOCTYPE html>
     <div class="logo">📈</div>
     <div class="header-title">
       <h1>Tapi's Trading Bot · Real</h1>
-      <p>Deriv · Volatility 10 Index · Live Account</p>
+      <p>Deriv · Volatility 25 Index · Live Account</p>
     </div>
   </div>
   <div class="header-right">
@@ -448,7 +467,7 @@ HTML = """<!DOCTYPE html>
 </header>
 
 <div class="ticker-bar">
-  <div class="ticker-item">Symbol <span>R_10</span></div>
+  <div class="ticker-item">Symbol <span>R_25</span></div>
   <div class="ticker-item">Today <span id="ticker-date">—</span></div>
   <div class="ticker-item">Daily P&L <span id="ticker-pnl">—</span></div>
   <div class="ticker-item">Win Rate <span id="ticker-wr">—</span></div>
@@ -486,11 +505,11 @@ HTML = """<!DOCTYPE html>
     <div class="value white" id="total-trades">—</div>
     <div class="sub">Closed positions</div>
   </div>
-  <div class="stat-card" style="--accent: var(--yellow)">
-    <span class="icon">⚡</span>
-    <div class="label">Best Trade</div>
-    <div class="value green" id="best-trade">—</div>
-    <div class="sub">Highest single profit</div>
+  <div class="stat-card" style="--accent: var(--red)">
+    <span class="icon">🔥</span>
+    <div class="label">Loss Streak</div>
+    <div class="value green" id="consec-losses">—</div>
+    <div class="sub" id="consec-losses-sub">Cooldown status</div>
   </div>
 </div>
 
@@ -504,10 +523,10 @@ HTML = """<!DOCTYPE html>
   </div>
   <div class="panel">
     <div class="panel-header">
-      <h2>Win / Loss Split</h2>
-      <span class="badge" id="donut-badge">All trades</span>
+      <h2>CALL / PUT Performance</h2>
+      <span class="badge" id="dir-badge">Direction split</span>
     </div>
-    <div class="donut-wrap"><canvas id="donut-chart"></canvas></div>
+    <div class="chart-wrap"><canvas id="dir-chart"></canvas></div>
   </div>
 </div>
 
@@ -548,6 +567,8 @@ HTML = """<!DOCTYPE html>
       <div class="perf-row" id="pr-avg-loss"></div>
       <div class="perf-row" id="pr-profit-factor"></div>
       <div class="perf-row" id="pr-max-dd"></div>
+      <div class="perf-row" id="pr-call-wr"></div>
+      <div class="perf-row" id="pr-put-wr"></div>
     </div>
   </div>
 </div>
@@ -577,7 +598,7 @@ HTML = """<!DOCTYPE html>
 
 <script>
 let equityChart = null;
-let donutChart = null;
+let dirChart = null;
 
 function num(val, decimals=2) {
   return Math.abs(val).toLocaleString('en-US', {minimumFractionDigits: decimals, maximumFractionDigits: decimals});
@@ -635,13 +656,22 @@ async function fetchStats() {
     document.getElementById('total-trades').textContent = d.total_trades ?? 0;
     document.getElementById('wl-sub').textContent = `${d.wins ?? 0} wins / ${d.losses ?? 0} losses`;
 
-    // Best trade
+    // Consecutive losses card
     const trades = d.recent_trades ?? [];
-    const allTrades = [...trades].sort((a,b) => (b.profit??0)-(a.profit??0));
-    const best = allTrades.length ? (allTrades[0].profit ?? 0) : 0;
-    const bestEl = document.getElementById('best-trade');
-    bestEl.textContent = best ? fmt(best) + ' USD' : '—';
-    bestEl.className = 'value ' + colorClass(best);
+    const cl = d.consecutive_losses ?? 0;
+    const clEl = document.getElementById('consec-losses');
+    const clSub = document.getElementById('consec-losses-sub');
+    clEl.textContent = cl;
+    if (cl === 0) {
+      clEl.className = 'value green';
+      clSub.textContent = 'Streak clear';
+    } else if (cl === 1) {
+      clEl.className = 'value yellow';
+      clSub.textContent = '1 loss in a row';
+    } else {
+      clEl.className = 'value red';
+      clSub.textContent = 'Cooldown active · ' + cl + ' cycles';
+    }
 
     // Ticker
     document.getElementById('ticker-date').textContent = d.date || '—';
@@ -699,42 +729,56 @@ async function fetchStats() {
       equityChart.update('none');
     }
 
-    // Donut chart
-    const wins = d.wins ?? 0;
-    const losses = d.losses ?? 0;
-    if (!donutChart) {
-      const ctx2 = document.getElementById('donut-chart').getContext('2d');
-      donutChart = new Chart(ctx2, {
-        type: 'doughnut',
+    // CALL / PUT performance chart
+    const callCount = d.call_count ?? 0;
+    const putCount  = d.put_count  ?? 0;
+    const callWins  = d.call_wins  ?? 0;
+    const putWins   = d.put_wins   ?? 0;
+    const callLosses = callCount - callWins;
+    const putLosses  = putCount  - putWins;
+    if (!dirChart) {
+      const ctx2 = document.getElementById('dir-chart').getContext('2d');
+      dirChart = new Chart(ctx2, {
+        type: 'bar',
         data: {
-          labels: ['Wins', 'Losses'],
-          datasets: [{
-            data: [wins || 1, losses || 0],
-            backgroundColor: ['#10b981', '#f43f5e'],
-            borderColor: '#0d1321',
-            borderWidth: 3,
-            hoverOffset: 6,
-          }]
+          labels: ['CALL ▲', 'PUT ▼'],
+          datasets: [
+            {
+              label: 'Wins',
+              data: [callWins, putWins],
+              backgroundColor: 'rgba(16,185,129,0.7)',
+              borderColor: '#10b981',
+              borderWidth: 1,
+              borderRadius: 4,
+            },
+            {
+              label: 'Losses',
+              data: [callLosses, putLosses],
+              backgroundColor: 'rgba(244,63,94,0.7)',
+              borderColor: '#f43f5e',
+              borderWidth: 1,
+              borderRadius: 4,
+            }
+          ]
         },
         options: {
           responsive: true, maintainAspectRatio: false,
-          cutout: '68%',
           plugins: {
-            legend: {
-              position: 'bottom',
-              labels: { color: '#64748b', font: { size: 11 }, padding: 14, boxWidth: 10, borderRadius: 3 }
-            },
-            tooltip: {
-              callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed}` }
-            }
+            legend: { position: 'bottom', labels: { color: '#64748b', font: { size: 11 }, padding: 14, boxWidth: 10 } },
+            tooltip: { callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y}` } }
+          },
+          scales: {
+            x: { ticks: { color: '#475569', font: { size: 12 } }, grid: { display: false } },
+            y: { ticks: { color: '#475569', font: { size: 10, family: 'JetBrains Mono' }, stepSize: 1 }, grid: { color: '#0f172a' } }
           }
         }
       });
     } else {
-      donutChart.data.datasets[0].data = [wins || 1, losses || 0];
-      donutChart.update('none');
+      dirChart.data.datasets[0].data = [callWins, putWins];
+      dirChart.data.datasets[1].data = [callLosses, putLosses];
+      dirChart.update('none');
     }
-    document.getElementById('donut-badge').textContent = wins + 'W / ' + losses + 'L';
+    document.getElementById('dir-badge').textContent = callCount + ' CALL / ' + putCount + ' PUT';
 
     // Open positions banner
     const openPos = d.open_positions ?? [];
@@ -796,6 +840,10 @@ async function fetchStats() {
     perfRow('pr-avg-loss',     'Avg Loss',         closedLoss.length  ? '-' + num(Math.abs(avgLoss)) + ' USD' : '—',  'red');
     perfRow('pr-profit-factor','Profit Factor',    pf,                                                       'cyan');
     perfRow('pr-max-dd',       'Max Drawdown',     maxDD > 0 ? '-' + num(maxDD) + ' USD' : '—',             'yellow');
+    const callWinRate = callCount ? Math.round(callWins / callCount * 100) : null;
+    const putWinRate  = putCount  ? Math.round(putWins  / putCount  * 100) : null;
+    perfRow('pr-call-wr', '▲ CALL Win Rate', callWinRate !== null ? callWinRate + '% (' + callCount + ' trades)' : '—', callWinRate >= 50 ? 'green' : 'red');
+    perfRow('pr-put-wr',  '▼ PUT Win Rate',  putWinRate  !== null ? putWinRate  + '% (' + putCount  + ' trades)' : '—', putWinRate  >= 50 ? 'green' : 'red');
 
     // Live indicator
     document.getElementById('live-badge').className = 'live-badge';
@@ -827,6 +875,8 @@ async function fetchLog() {
         return `<div class="log-signal-buy">${safe}</div>`;
       if (line.includes('Signal=SELL') || line.includes('Signal=PUT'))
         return `<div class="log-signal-sell">${safe}</div>`;
+      if (line.includes('HOLD | BUY='))
+        return `<div class="log-signal-score">${safe}</div>`;
       if (line.includes('Signal=HOLD'))
         return `<div class="log-signal-hold">${safe}</div>`;
       return `<div class="log-info">${safe}</div>`;

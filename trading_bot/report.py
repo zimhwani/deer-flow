@@ -30,8 +30,16 @@ def report():
 
     wins = [t for t in trades if t.get("profit", 0) > 0]
     losses = [t for t in trades if t.get("profit", 0) <= 0]
+    calls = [t for t in trades if t.get("contract_type") == "CALL"]
+    puts  = [t for t in trades if t.get("contract_type") == "PUT"]
     total_profit = sum(t.get("profit", 0) for t in trades)
     win_rate = len(wins) / len(trades) * 100 if trades else 0
+    consecutive_losses = 0
+    for t in reversed(trades):
+        if t.get("profit", 0) < 0:
+            consecutive_losses += 1
+        else:
+            break
 
     avg_win = sum(t["profit"] for t in wins) / len(wins) if wins else 0
     avg_loss = sum(t["profit"] for t in losses) / len(losses) if losses else 0
@@ -56,6 +64,9 @@ def report():
     print(f"  Losses:         {len(losses)}")
     print(f"  Win Rate:       {win_rate:.1f}%")
     print(f"  Profit Factor:  {profit_factor:.2f}")
+    print(f"  CALL Trades:    {len(calls)}  (wins: {len([t for t in calls if t.get('profit',0)>0])})")
+    print(f"  PUT Trades:     {len(puts)}  (wins: {len([t for t in puts if t.get('profit',0)>0])})")
+    print(f"  Loss Streak:    {consecutive_losses}")
     print("-" * 50)
     print(f"  Avg Win:        ${avg_win:+.2f}")
     print(f"  Avg Loss:       ${avg_loss:+.2f}")
