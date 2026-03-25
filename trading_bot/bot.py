@@ -160,14 +160,14 @@ class TradingBot:
 
     async def _run_cycle(self) -> None:
         """Single analysis and trade cycle."""
-        # 1. Check if trading is permitted
+        # 1. Always check open positions first so expired contracts are settled
+        await self._check_open_positions()
+
+        # 2. Check if trading is permitted
         can_trade, reason = self.risk.can_trade(self._balance)
         if not can_trade:
             logger.info(f"Cycle {self._cycle_count}: Skipping - {reason}")
             return
-
-        # 2. Check open positions for expired/closed contracts
-        await self._check_open_positions()
 
         # 3. Fetch market data (5-minute candles, last 50)
         candles = await self.client.get_candles(
