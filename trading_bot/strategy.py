@@ -203,4 +203,8 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
         if current_price < bb_lower:
             return TradeSignal(Signal.BUY, min(buy_confidence, 0.95), " | ".join(buy_reasons), symbol)
 
+    logger.info(
+        f"{symbol} HOLD | BUY={buy_confidence:.2f} ({', '.join(buy_reasons) or 'no conditions'}) | "
+        f"SELL={sell_confidence:.2f} ({', '.join(sell_reasons) or 'no conditions'})"
+    )
     return TradeSignal(Signal.HOLD, 0.0, "No clear signal", symbol)
