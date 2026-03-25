@@ -65,6 +65,13 @@ class RiskManager:
                 if saved_date == date.today():
                     self._daily_pnl = state.get("daily_pnl", 0.0)
                     self._trade_log = state.get("trade_log", [])
+                    # Restore open positions as a dict keyed by contract_id
+                    saved_open = state.get("open_positions", [])
+                    self._open_positions = {
+                        int(p["contract_id"]): p for p in saved_open
+                    }
+                    if self._open_positions:
+                        logger.info(f"Restored {len(self._open_positions)} open position(s) from state")
                     logger.info(f"Resumed session | Daily P&L: {self._daily_pnl:+.2f} AUD")
                 else:
                     logger.info("New trading day - resetting daily P&L")
