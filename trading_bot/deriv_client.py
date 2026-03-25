@@ -78,7 +78,7 @@ class DerivClient:
         self.ws = await websockets.connect(
             ws_url,
             ping_interval=30,
-            ping_timeout=10,
+            ping_timeout=20,
         )
         self._listener_task = asyncio.create_task(self._listen())
         logger.info("Connected to Deriv API")
@@ -148,6 +148,7 @@ class DerivClient:
 
         except ConnectionClosed as e:
             logger.warning(f"WebSocket connection closed: {e}")
+            self.is_authorized = False
             # Fail any pending requests
             for future in self._pending.values():
                 if not future.done():
