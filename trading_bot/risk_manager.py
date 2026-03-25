@@ -46,6 +46,7 @@ class RiskManager:
         self._trade_log: List[Dict] = []
         self._session_start_balance: float = starting_balance
         self._current_balance: float = starting_balance
+        self._last_cooldown_trigger_losses: int = 0
 
         os.makedirs(data_dir, exist_ok=True)
         self._load_state()
@@ -72,6 +73,7 @@ class RiskManager:
                     }
                     if self._open_positions:
                         logger.info(f"Restored {len(self._open_positions)} open position(s) from state")
+                    self._last_cooldown_trigger_losses = state.get("last_cooldown_trigger_losses", 0)
                     logger.info(f"Resumed session | Daily P&L: {self._daily_pnl:+.2f} AUD")
                 else:
                     logger.info("New trading day - resetting daily P&L")
@@ -90,6 +92,7 @@ class RiskManager:
             "balance": self._current_balance,
             "trade_log": self._trade_log[-100:],
             "open_positions": list(self._open_positions.values()),
+            "last_cooldown_trigger_losses": self._last_cooldown_trigger_losses,
         }
         with open(self._state_path(), "w") as f:
             json.dump(state, f, indent=2)
@@ -208,6 +211,13 @@ class RiskManager:
             else:
                 break
         return count
+
+    def get_last_cooldown_trigger_losses(self) -> int:
+        return self._last_cooldown_trigger_losses
+
+    def set_last_cooldown_trigger_losses(self, value: int) -> None:
+        self._last_cooldown_trigger_losses = value
+        self._save_state()
 
     def get_last_trade_time(self):
         """Return the opened_at timestamp of the most recent trade, or None."""

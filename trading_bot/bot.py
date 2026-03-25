@@ -201,10 +201,15 @@ class TradingBot:
 
         # 6. Consecutive loss cooldown — skip N cycles after N consecutive losses
         consecutive_losses = self.risk.get_consecutive_losses()
+        # Reset persisted cooldown trigger when a win breaks the streak
+        if consecutive_losses == 0 and hasattr(self, "_last_cooldown_trigger_losses") and self._last_cooldown_trigger_losses != 0:
+            self._last_cooldown_trigger_losses = 0
+            self.risk.set_last_cooldown_trigger_losses(0)
         if consecutive_losses >= 2:
             if not hasattr(self, "_loss_cooldown_until"):
                 self._loss_cooldown_until = 0
-                self._last_cooldown_trigger_losses = 0
+                # Restore persisted value so restarts don't re-trigger served cooldowns
+                self._last_cooldown_trigger_losses = self.risk.get_last_cooldown_trigger_losses()
 
             if self._cycle_count <= self._loss_cooldown_until:
                 logger.info(
@@ -217,6 +222,7 @@ class TradingBot:
                 cooldown_cycles = consecutive_losses
                 self._loss_cooldown_until = self._cycle_count + cooldown_cycles
                 self._last_cooldown_trigger_losses = consecutive_losses
+                self.risk.set_last_cooldown_trigger_losses(consecutive_losses)
                 logger.info(
                     f"Cycle {self._cycle_count}: {consecutive_losses} consecutive losses — "
                     f"cooldown set for {cooldown_cycles} cycles"
