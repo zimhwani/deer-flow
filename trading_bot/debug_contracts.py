@@ -37,7 +37,7 @@ async def main():
     contract_ids = [int(p["contract_id"]) for p in open_positions]
     print(f"Open positions to resolve: {contract_ids}\n")
 
-    client = DerivClient(api_token=config.api_token, app_id=config.app_id)
+    client = DerivClient(api_token=config.api_token, app_id=config.app_id, account_id=config.account_id)
     await client.connect()
 
     print("--- ACCOUNT STATEMENT (last 20) ---")
