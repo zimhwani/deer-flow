@@ -126,37 +126,35 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
         f"BB: {bb_lower:.5f}/{bb_mid:.5f}/{bb_upper:.5f}"
     )
 
-    # Trend direction from EMA slope
-    ema20_prev = calculate_ema(closes[:-1], period=20)
-    trend_up = ema20 > ema20_prev if ema20_prev else True
-    trend_down = ema20 < ema20_prev if ema20_prev else True
+    # Trend direction from 5-candle EMA slope (more reliable than 1-candle)
+    ema20_prev = calculate_ema(closes[:-5], period=20) if len(closes) > 25 else None
+    trend_up = ema20 > ema20_prev if ema20_prev is not None else False
+    trend_down = ema20 < ema20_prev if ema20_prev is not None else False
 
     confidence = 0.0
     reasons = []
 
     # === BUY Signal (CALL) ===
-    if rsi is not None and rsi < 40:
-        confidence += 0.35
-        reasons.append(f"RSI oversold ({rsi:.1f})")
-
+    # Require Bollinger Band confirmation — RSI alone is not enough
     if current_price < bb_lower:
-        confidence += 0.30
+        confidence += 0.35
         reasons.append("Price below lower Bollinger Band")
-    elif current_price < bb_mid and rsi < 45:
-        confidence += 0.15
-        reasons.append("Price below BB midline + low RSI")
+        if rsi is not None and rsi < 40:
+            confidence += 0.25
+            reasons.append(f"RSI oversold ({rsi:.1f})")
+    elif current_price < bb_mid and rsi is not None and rsi < 35:
+        confidence += 0.30
+        reasons.append(f"Price below BB midline + RSI very oversold ({rsi:.1f})")
 
     if trend_up:
         confidence += 0.20
         reasons.append("EMA trend: bullish")
-    elif not trend_down:
-        confidence += 0.10
 
     if ema10 > ema20 and trend_up:
         confidence += 0.15
         reasons.append("EMA10 > EMA20 (momentum up)")
 
-    if confidence >= 0.55:
+    if confidence >= 0.65:
         return TradeSignal(
             Signal.BUY,
             min(confidence, 0.95),
@@ -168,28 +166,26 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
     confidence = 0.0
     reasons = []
 
-    if rsi is not None and rsi > 60:
-        confidence += 0.35
-        reasons.append(f"RSI overbought ({rsi:.1f})")
-
+    # Require Bollinger Band confirmation — RSI alone is not enough
     if current_price > bb_upper:
-        confidence += 0.30
+        confidence += 0.35
         reasons.append("Price above upper Bollinger Band")
-    elif current_price > bb_mid and rsi > 55:
-        confidence += 0.15
-        reasons.append("Price above BB midline + high RSI")
+        if rsi is not None and rsi > 60:
+            confidence += 0.25
+            reasons.append(f"RSI overbought ({rsi:.1f})")
+    elif current_price > bb_mid and rsi is not None and rsi > 65:
+        confidence += 0.30
+        reasons.append(f"Price above BB midline + RSI very overbought ({rsi:.1f})")
 
     if trend_down:
         confidence += 0.20
         reasons.append("EMA trend: bearish")
-    elif not trend_up:
-        confidence += 0.10
 
     if ema10 < ema20 and trend_down:
         confidence += 0.15
         reasons.append("EMA10 < EMA20 (momentum down)")
 
-    if confidence >= 0.55:
+    if confidence >= 0.65:
         return TradeSignal(
             Signal.SELL,
             min(confidence, 0.95),

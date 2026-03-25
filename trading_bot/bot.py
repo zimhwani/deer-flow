@@ -188,8 +188,37 @@ class TradingBot:
         )
 
         # 5. Execute trade if signal is strong enough
-        if signal.signal == Signal.HOLD or signal.confidence < 0.55:
+        if signal.signal == Signal.HOLD or signal.confidence < 0.65:
             return
+
+        # 6. Consecutive loss cooldown — skip 2 cycles after 2 losses in a row
+        consecutive_losses = self.risk.get_consecutive_losses()
+        if consecutive_losses >= 2:
+            cooldown_cycles = consecutive_losses  # 2 losses → skip 2 cycles, 3 → skip 3, etc.
+            if not hasattr(self, "_loss_cooldown_until"):
+                self._loss_cooldown_until = 0
+            if self._cycle_count <= self._loss_cooldown_until:
+                logger.info(
+                    f"Cycle {self._cycle_count}: Loss cooldown active "
+                    f"({consecutive_losses} consecutive losses, cooling until cycle {self._loss_cooldown_until})"
+                )
+                return
+            else:
+                self._loss_cooldown_until = self._cycle_count + cooldown_cycles
+                logger.info(f"Cycle {self._cycle_count}: {consecutive_losses} consecutive losses — cooldown set for {cooldown_cycles} cycles")
+                return
+
+        # 7. Minimum gap between trades — don't open if a trade was opened < 2 min ago
+        last_trade_time = self.risk.get_last_trade_time()
+        if last_trade_time:
+            try:
+                last_dt = datetime.fromisoformat(last_trade_time)
+                gap_seconds = (datetime.utcnow() - last_dt).total_seconds()
+                if gap_seconds < 120:
+                    logger.info(f"Cycle {self._cycle_count}: Trade gap too short ({gap_seconds:.0f}s < 120s), skipping")
+                    return
+            except Exception:
+                pass
 
         stake = self.risk.calculate_stake(self._balance)
         currency = self.client.account_info.get("currency", self.config.currency)

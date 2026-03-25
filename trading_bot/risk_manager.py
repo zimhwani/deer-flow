@@ -199,6 +199,29 @@ class RiskManager:
     def get_daily_pnl(self) -> float:
         return self._daily_pnl
 
+    def get_consecutive_losses(self) -> int:
+        """Count how many of the most recent closed trades were losses."""
+        count = 0
+        for trade in reversed(self._trade_log):
+            if trade.get("profit", 0) < 0:
+                count += 1
+            else:
+                break
+        return count
+
+    def get_last_trade_time(self):
+        """Return the opened_at timestamp of the most recent trade, or None."""
+        if not self._open_positions and not self._trade_log:
+            return None
+        # Check most recent open position
+        if self._open_positions:
+            times = [p.get("opened_at") for p in self._open_positions.values() if p.get("opened_at")]
+            if times:
+                return max(times)
+        # Fall back to last closed trade
+        if self._trade_log:
+            return self._trade_log[-1].get("opened_at")
+
     def get_stats(self) -> Dict:
         """Return current session statistics."""
         trades = self._trade_log
