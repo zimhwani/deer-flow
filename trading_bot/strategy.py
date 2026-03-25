@@ -154,7 +154,7 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
         confidence += 0.15
         reasons.append("EMA10 > EMA20 (momentum up)")
 
-    if confidence >= 0.65:
+    if confidence >= 0.55:
         return TradeSignal(
             Signal.BUY,
             min(confidence, 0.95),
@@ -185,7 +185,7 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
         confidence += 0.15
         reasons.append("EMA10 < EMA20 (momentum down)")
 
-    if confidence >= 0.65:
+    if confidence >= 0.55:
         return TradeSignal(
             Signal.SELL,
             min(confidence, 0.95),
