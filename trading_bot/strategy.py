@@ -95,14 +95,16 @@ def calculate_bollinger_bands(prices: List[float], period: int = 20, std_dev: fl
 
 def generate_signal(candles: list, symbol: str) -> TradeSignal:
     """
-    Analyse candle data and produce a trading signal.
+    Two-path strategy: mean-reversion (BB-led) and trend-following (EMA-led).
+    BUY and SELL confidence are scored fully and independently; the stronger
+    signal wins. This prevents the EMA trend from permanently blocking
+    counter-trend mean-reversion trades.
 
-    Strategy logic:
-    1. Need at least 30 candles for reliable signals
-    2. RSI oversold (<35) + price below lower BB → BUY signal
-    3. RSI overbought (>65) + price above upper BB → SELL signal
-    4. EMA trend filter: only trade in direction of EMA(20) slope
-    5. Reject if RSI is between 40–60 (no clear momentum)
+    Mean-reversion path (trend-independent):
+      Price outside BB + RSI extreme → self-sufficient at 0.55
+
+    Trend-following path (EMA-dependent):
+      EMA crossover + trend slope + RSI momentum → 0.55 when aligned
     """
     if len(candles) < 30:
         return TradeSignal(Signal.HOLD, 0.0, "Insufficient data", symbol)
@@ -126,89 +128,79 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
         f"BB: {bb_lower:.5f}/{bb_mid:.5f}/{bb_upper:.5f}"
     )
 
-    # Trend direction from 5-candle EMA slope (more reliable than 1-candle)
+    # Trend direction from 5-candle EMA slope
     ema20_prev = calculate_ema(closes[:-5], period=20) if len(closes) > 25 else None
     trend_up = ema20 > ema20_prev if ema20_prev is not None else False
     trend_down = ema20 < ema20_prev if ema20_prev is not None else False
 
-    # === BUY Signal (CALL) ===
+    # === BUY confidence (fully scored before comparing to SELL) ===
     buy_confidence = 0.0
     buy_reasons = []
 
-    # Bollinger Band conditions (strong signals)
+    # Mean-reversion path — self-sufficient at price below BB + RSI oversold
     if current_price < bb_lower:
         buy_confidence += 0.30
         buy_reasons.append("Price below lower BB")
-        if rsi is not None and rsi < 40:
-            buy_confidence += 0.20
+        if rsi < 40:
+            buy_confidence += 0.25
             buy_reasons.append(f"RSI oversold ({rsi:.1f})")
-        if rsi is not None and rsi < 30:
+        if rsi < 30:
             buy_confidence += 0.10
             buy_reasons.append(f"RSI strongly oversold ({rsi:.1f})")
-    elif current_price < bb_mid and rsi is not None and rsi < 35:
+    elif current_price < bb_mid and rsi < 35:
         buy_confidence += 0.25
         buy_reasons.append(f"Below BB mid + RSI very oversold ({rsi:.1f})")
 
-    # EMA crossover (works independently of BB)
+    # Trend-following path
     if ema10 > ema20:
         buy_confidence += 0.25
-        buy_reasons.append("EMA10 > EMA20 crossover")
-
+        buy_reasons.append("EMA10 > EMA20")
     if trend_up:
         buy_confidence += 0.20
         buy_reasons.append("EMA trend: bullish")
-
-    # RSI momentum support (mild boost when directionally aligned)
-    if rsi is not None and 50 < rsi < 70 and trend_up:
+    if 50 < rsi < 70 and trend_up:
         buy_confidence += 0.10
         buy_reasons.append(f"RSI bullish ({rsi:.1f})")
 
-    if buy_confidence >= 0.55:
-        return TradeSignal(
-            Signal.BUY,
-            min(buy_confidence, 0.95),
-            " | ".join(buy_reasons),
-            symbol,
-        )
-
-    # === SELL Signal (PUT) ===
+    # === SELL confidence (fully scored before comparing to BUY) ===
     sell_confidence = 0.0
     sell_reasons = []
 
-    # Bollinger Band conditions (strong signals)
+    # Mean-reversion path — self-sufficient at price above BB + RSI overbought
     if current_price > bb_upper:
         sell_confidence += 0.30
         sell_reasons.append("Price above upper BB")
-        if rsi is not None and rsi > 60:
-            sell_confidence += 0.20
+        if rsi > 60:
+            sell_confidence += 0.25
             sell_reasons.append(f"RSI overbought ({rsi:.1f})")
-        if rsi is not None and rsi > 70:
+        if rsi > 70:
             sell_confidence += 0.10
             sell_reasons.append(f"RSI strongly overbought ({rsi:.1f})")
-    elif current_price > bb_mid and rsi is not None and rsi > 65:
+    elif current_price > bb_mid and rsi > 65:
         sell_confidence += 0.25
         sell_reasons.append(f"Above BB mid + RSI very overbought ({rsi:.1f})")
 
-    # EMA crossover (works independently of BB)
+    # Trend-following path
     if ema10 < ema20:
         sell_confidence += 0.25
-        sell_reasons.append("EMA10 < EMA20 crossover")
-
+        sell_reasons.append("EMA10 < EMA20")
     if trend_down:
         sell_confidence += 0.20
         sell_reasons.append("EMA trend: bearish")
-
-    # RSI momentum support (mild boost when directionally aligned)
-    if rsi is not None and 30 < rsi < 50 and trend_down:
+    if 30 < rsi < 50 and trend_down:
         sell_confidence += 0.10
         sell_reasons.append(f"RSI bearish ({rsi:.1f})")
 
-    if sell_confidence >= 0.55:
-        return TradeSignal(
-            Signal.SELL,
-            min(sell_confidence, 0.95),
-            " | ".join(sell_reasons),
-            symbol,
-        )
+    # Return the stronger signal; both scored in full before deciding
+    if buy_confidence >= 0.55 or sell_confidence >= 0.55:
+        if buy_confidence > sell_confidence:
+            return TradeSignal(Signal.BUY, min(buy_confidence, 0.95), " | ".join(buy_reasons), symbol)
+        if sell_confidence > buy_confidence:
+            return TradeSignal(Signal.SELL, min(sell_confidence, 0.95), " | ".join(sell_reasons), symbol)
+        # Equal confidence — BB extreme takes priority as stronger evidence
+        if current_price > bb_upper:
+            return TradeSignal(Signal.SELL, min(sell_confidence, 0.95), " | ".join(sell_reasons), symbol)
+        if current_price < bb_lower:
+            return TradeSignal(Signal.BUY, min(buy_confidence, 0.95), " | ".join(buy_reasons), symbol)
 
     return TradeSignal(Signal.HOLD, 0.0, "No clear signal", symbol)
