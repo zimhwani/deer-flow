@@ -10,6 +10,8 @@ import sys
 from datetime import datetime
 from typing import Optional
 
+from websockets.exceptions import ConnectionClosed
+
 from .config import TradingConfig, load_config
 from .deriv_client import DerivClient
 from .risk_manager import RiskManager
@@ -137,6 +139,9 @@ class TradingBot:
 
             try:
                 await self._run_cycle()
+            except (ConnectionClosed, ConnectionError, OSError) as e:
+                logger.warning(f"Cycle {self._cycle_count}: connection lost ({e}), triggering reconnect")
+                raise
             except Exception as e:
                 logger.error(f"Cycle {self._cycle_count} error: {e}", exc_info=True)
 
@@ -146,6 +151,9 @@ class TradingBot:
                     balance_info = await self.client.get_balance()
                     self._balance = float(balance_info.get("balance", self._balance))
                     self.risk.update_balance(self._balance)
+                except (ConnectionClosed, ConnectionError, OSError) as e:
+                    logger.warning(f"Balance refresh: connection lost ({e}), triggering reconnect")
+                    raise
                 except Exception as e:
                     logger.warning(f"Balance refresh failed: {e}")
 
