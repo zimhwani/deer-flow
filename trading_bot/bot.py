@@ -48,6 +48,11 @@ class TradingBot:
         self._running = False
         self._balance: float = config.starting_balance
         self._cycle_count: int = 0
+        # Rolling win-rate circuit breaker
+        self._winrate_pause_until: int = 0
+        # Whipsaw filter — suppress rapid direction flips
+        self._last_trade_direction: Optional[Signal] = None
+        self._last_trade_cycle: int = 0
 
     async def start(self) -> None:
         """Start the bot with automatic reconnection."""
@@ -177,6 +182,29 @@ class TradingBot:
             logger.info(f"Cycle {self._cycle_count}: Skipping - {reason}")
             return
 
+        # 2b. Rolling win-rate circuit breaker
+        if self._cycle_count <= self._winrate_pause_until:
+            logger.info(
+                f"Cycle {self._cycle_count}: Win-rate pause active (cooling until cycle {self._winrate_pause_until})"
+            )
+            return
+        rolling_wr = self.risk.get_rolling_win_rate(20)
+        if rolling_wr is not None:
+            if rolling_wr < 0.35:
+                self._winrate_pause_until = self._cycle_count + 30
+                logger.warning(
+                    f"Cycle {self._cycle_count}: Rolling win rate {rolling_wr:.0%} < 35% — "
+                    f"severe pause for 30 cycles (until cycle {self._winrate_pause_until})"
+                )
+                return
+            elif rolling_wr < 0.45:
+                self._winrate_pause_until = self._cycle_count + 10
+                logger.warning(
+                    f"Cycle {self._cycle_count}: Rolling win rate {rolling_wr:.0%} < 45% — "
+                    f"pause for 10 cycles (until cycle {self._winrate_pause_until})"
+                )
+                return
+
         # 3. Fetch market data (5-minute candles, last 50)
         candles = await self.client.get_candles(
             symbol=self.config.symbol,
@@ -198,6 +226,19 @@ class TradingBot:
         # 5. Execute trade if signal is strong enough
         if signal.signal == Signal.HOLD or signal.confidence < 0.55:
             return
+
+        # 5b. Whipsaw filter — suppress rapid direction flips
+        if self._last_trade_direction is not None:
+            flipped = (
+                (signal.signal == Signal.BUY and self._last_trade_direction == Signal.SELL)
+                or (signal.signal == Signal.SELL and self._last_trade_direction == Signal.BUY)
+            )
+            if flipped and (self._cycle_count - self._last_trade_cycle) < 5:
+                logger.info(
+                    f"Cycle {self._cycle_count}: Whipsaw filter — suppressing {signal.signal.name} "
+                    f"(opposite of {self._last_trade_direction.name} placed {self._cycle_count - self._last_trade_cycle} cycles ago)"
+                )
+                return
 
         # 6. Consecutive loss cooldown — skip N cycles after N consecutive losses
         consecutive_losses = self.risk.get_consecutive_losses()
@@ -263,6 +304,10 @@ class TradingBot:
                 payout=float(contract.get("payout", 0)),
                 buy_price=float(contract.get("buy_price", stake)),
             )
+
+            # Record direction for whipsaw filter
+            self._last_trade_direction = signal.signal
+            self._last_trade_cycle = self._cycle_count
 
             # Subscribe to real-time settlement updates
             try:

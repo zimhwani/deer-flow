@@ -112,7 +112,7 @@ class RiskManager:
     def calculate_stake(self, balance: float) -> float:
         """
         Calculate the stake size for a new trade.
-        Stakes 1.5% of current balance, minimum $150, maximum max_risk_per_trade_pct%.
+        Stakes 1.5% of current balance, minimum $1.00, maximum max_risk_per_trade_pct%.
         """
         max_stake = balance * (self.max_risk_per_trade_pct / 100)
         stake = balance * 0.015
@@ -211,6 +211,14 @@ class RiskManager:
             else:
                 break
         return count
+
+    def get_rolling_win_rate(self, n: int = 20) -> Optional[float]:
+        """Return win rate over the last n closed trades, or None if fewer than n trades."""
+        if len(self._trade_log) < n:
+            return None
+        window = self._trade_log[-n:]
+        wins = sum(1 for t in window if t.get("profit", 0) > 0)
+        return wins / n
 
     def get_last_cooldown_trigger_losses(self) -> int:
         return self._last_cooldown_trigger_losses
