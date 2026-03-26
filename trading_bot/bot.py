@@ -50,6 +50,7 @@ class TradingBot:
         self._cycle_count: int = 0
         # Rolling win-rate circuit breaker
         self._winrate_pause_until: int = 0
+        self._winrate_pause_trade_count: int = 0  # total_trades when pause was last triggered
         # Whipsaw filter — suppress rapid direction flips
         self._last_trade_direction: Optional[Signal] = None
         self._last_trade_cycle: int = 0
@@ -193,15 +194,22 @@ class TradingBot:
             return
         rolling_wr = self.risk.get_rolling_win_rate(20)
         if rolling_wr is not None:
-            if rolling_wr < 0.35:
+            current_trade_count = self.risk.get_stats()["total_trades"]
+            # Only re-trigger pause if at least 1 new trade has closed since the last pause.
+            # If no new trades, allow one through so the win rate can be updated — prevents
+            # infinite re-trigger loop when the rolling window is frozen with no new data.
+            new_trades_since_pause = current_trade_count > self._winrate_pause_trade_count
+            if rolling_wr < 0.35 and new_trades_since_pause:
                 self._winrate_pause_until = self._cycle_count + 30
+                self._winrate_pause_trade_count = current_trade_count
                 logger.warning(
                     f"Cycle {self._cycle_count}: Rolling win rate {rolling_wr:.0%} < 35% — "
                     f"severe pause for 30 cycles (until cycle {self._winrate_pause_until})"
                 )
                 return
-            elif rolling_wr < 0.45:
+            elif rolling_wr < 0.45 and new_trades_since_pause:
                 self._winrate_pause_until = self._cycle_count + 10
+                self._winrate_pause_trade_count = current_trade_count
                 logger.warning(
                     f"Cycle {self._cycle_count}: Rolling win rate {rolling_wr:.0%} < 45% — "
                     f"pause for 10 cycles (until cycle {self._winrate_pause_until})"
