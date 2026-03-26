@@ -22,5 +22,11 @@ if __name__ == "__main__":
         default=None,
         help="Path to JSON config file (optional, env vars take precedence)",
     )
+    parser.add_argument(
+        "--symbol",
+        type=str,
+        default=None,
+        help="Trading symbol to use, e.g. R_25, R_50, R_75, R_100 (overrides config and env var)",
+    )
     args = parser.parse_args()
-    asyncio.run(main(args.config))
+    asyncio.run(main(args.config, symbol=args.symbol))

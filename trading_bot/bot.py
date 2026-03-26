@@ -374,12 +374,23 @@ class TradingBot:
         )
 
 
-async def main(config_path: Optional[str] = None) -> None:
+async def main(config_path: Optional[str] = None, symbol: Optional[str] = None) -> None:
     """Entry point for the trading bot."""
     config = load_config(config_path)
 
-    # Ensure data directory exists before opening log file
+    # CLI --symbol overrides config file and env var
+    if symbol is not None:
+        config.symbol = symbol
+
+    # Give each symbol its own data directory so state/logs don't mix
     import os
+    base_data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+    symbol_data_dir = os.path.join(base_data_dir, config.symbol)
+    # Only auto-set if the user hasn't explicitly configured data_dir via env/json
+    if not os.environ.get("TRADING_DATA_DIR") and config.data_dir == base_data_dir:
+        config.data_dir = symbol_data_dir
+
+    # Ensure data directory exists before opening log file
     os.makedirs(config.data_dir, exist_ok=True)
 
     # Set up logging
