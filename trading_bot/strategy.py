@@ -205,17 +205,27 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
         sell_confidence += 0.10
         sell_reasons.append("Spike in downtrend")
 
+    # Determine if mean-reversion (BB extreme) is driving the signal
+    buy_is_mean_reversion = current_price < bb_lower
+    sell_is_mean_reversion = current_price > bb_upper
+
+    # Lower threshold (0.50) when both EMA crossover AND slope agree — two independent confirmations
+    buy_threshold = 0.50 if (ema10 > ema20 and trend_up) else 0.55
+    sell_threshold = 0.50 if (ema10 < ema20 and trend_down) else 0.55
+
     # Return the stronger signal; both scored in full before deciding
-    if buy_confidence >= 0.55 or sell_confidence >= 0.55:
-        if buy_confidence > sell_confidence:
-            return TradeSignal(Signal.BUY, min(buy_confidence, 0.95), " | ".join(buy_reasons), symbol)
-        if sell_confidence > buy_confidence:
-            return TradeSignal(Signal.SELL, min(sell_confidence, 0.95), " | ".join(sell_reasons), symbol)
+    if buy_confidence >= buy_threshold or sell_confidence >= sell_threshold:
+        if buy_confidence > sell_confidence and buy_confidence >= buy_threshold:
+            duration = 5 if buy_is_mean_reversion else 2
+            return TradeSignal(Signal.BUY, min(buy_confidence, 0.95), " | ".join(buy_reasons), symbol, suggested_duration=duration)
+        if sell_confidence > buy_confidence and sell_confidence >= sell_threshold:
+            duration = 5 if sell_is_mean_reversion else 2
+            return TradeSignal(Signal.SELL, min(sell_confidence, 0.95), " | ".join(sell_reasons), symbol, suggested_duration=duration)
         # Equal confidence — BB extreme takes priority as stronger evidence
         if current_price > bb_upper:
-            return TradeSignal(Signal.SELL, min(sell_confidence, 0.95), " | ".join(sell_reasons), symbol)
+            return TradeSignal(Signal.SELL, min(sell_confidence, 0.95), " | ".join(sell_reasons), symbol, suggested_duration=5)
         if current_price < bb_lower:
-            return TradeSignal(Signal.BUY, min(buy_confidence, 0.95), " | ".join(buy_reasons), symbol)
+            return TradeSignal(Signal.BUY, min(buy_confidence, 0.95), " | ".join(buy_reasons), symbol, suggested_duration=5)
 
     logger.info(
         f"{symbol} HOLD | RSI={rsi:.1f} | BUY={buy_confidence:.2f} ({', '.join(buy_reasons) or 'no conditions'}) | "

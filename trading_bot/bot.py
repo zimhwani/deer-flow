@@ -176,6 +176,9 @@ class TradingBot:
         # 1. Always check open positions first so expired contracts are settled
         await self._check_open_positions()
 
+        # 1b. Check for early exit on losing contracts
+        await self._check_early_exit()
+
         # 2. Check if trading is permitted
         can_trade, reason = self.risk.can_trade(self._balance)
         if not can_trade:
@@ -205,6 +208,26 @@ class TradingBot:
                 )
                 return
 
+        # 2c. Update cooldown state every cycle (even during HOLD)
+        consecutive_losses = self.risk.get_consecutive_losses()
+        if not hasattr(self, "_loss_cooldown_until"):
+            self._loss_cooldown_until = 0
+            self._last_cooldown_trigger_losses = self.risk.get_last_cooldown_trigger_losses()
+        # Reset persisted cooldown trigger when a win breaks the streak
+        if consecutive_losses == 0 and self._last_cooldown_trigger_losses != 0:
+            self._last_cooldown_trigger_losses = 0
+            self.risk.set_last_cooldown_trigger_losses(0)
+        # Trigger new cooldown if loss streak has grown
+        if consecutive_losses >= 2 and consecutive_losses != self._last_cooldown_trigger_losses:
+            cooldown_cycles = consecutive_losses
+            self._loss_cooldown_until = self._cycle_count + cooldown_cycles
+            self._last_cooldown_trigger_losses = consecutive_losses
+            self.risk.set_last_cooldown_trigger_losses(consecutive_losses)
+            logger.info(
+                f"Cycle {self._cycle_count}: {consecutive_losses} consecutive losses — "
+                f"cooldown set for {cooldown_cycles} cycles"
+            )
+
         # 3. Fetch market data (5-minute candles, last 50)
         candles = await self.client.get_candles(
             symbol=self.config.symbol,
@@ -223,8 +246,8 @@ class TradingBot:
             f"Confidence={signal.confidence:.0%} | {signal.reason}"
         )
 
-        # 5. Execute trade if signal is strong enough
-        if signal.signal == Signal.HOLD or signal.confidence < 0.55:
+        # 5. Execute trade if signal is strong enough (strategy handles threshold internally)
+        if signal.signal == Signal.HOLD:
             return
 
         # 5b. Whipsaw filter — suppress rapid direction flips
@@ -240,36 +263,13 @@ class TradingBot:
                 )
                 return
 
-        # 6. Consecutive loss cooldown — skip N cycles after N consecutive losses
-        consecutive_losses = self.risk.get_consecutive_losses()
-        # Reset persisted cooldown trigger when a win breaks the streak
-        if consecutive_losses == 0 and hasattr(self, "_last_cooldown_trigger_losses") and self._last_cooldown_trigger_losses != 0:
-            self._last_cooldown_trigger_losses = 0
-            self.risk.set_last_cooldown_trigger_losses(0)
-        if consecutive_losses >= 2:
-            if not hasattr(self, "_loss_cooldown_until"):
-                self._loss_cooldown_until = 0
-                # Restore persisted value so restarts don't re-trigger served cooldowns
-                self._last_cooldown_trigger_losses = self.risk.get_last_cooldown_trigger_losses()
-
-            if self._cycle_count <= self._loss_cooldown_until:
-                logger.info(
-                    f"Cycle {self._cycle_count}: Loss cooldown active "
-                    f"({consecutive_losses} consecutive losses, cooling until cycle {self._loss_cooldown_until})"
-                )
-                return
-
-            if consecutive_losses != self._last_cooldown_trigger_losses:
-                cooldown_cycles = consecutive_losses
-                self._loss_cooldown_until = self._cycle_count + cooldown_cycles
-                self._last_cooldown_trigger_losses = consecutive_losses
-                self.risk.set_last_cooldown_trigger_losses(consecutive_losses)
-                logger.info(
-                    f"Cycle {self._cycle_count}: {consecutive_losses} consecutive losses — "
-                    f"cooldown set for {cooldown_cycles} cycles"
-                )
-                return
-            # Cooldown served for this loss streak — allow trade to proceed
+        # 6. Consecutive loss cooldown — enforce pause (state updated in step 2c)
+        if consecutive_losses >= 2 and self._cycle_count <= self._loss_cooldown_until:
+            logger.info(
+                f"Cycle {self._cycle_count}: Loss cooldown active "
+                f"({consecutive_losses} consecutive losses, cooling until cycle {self._loss_cooldown_until})"
+            )
+            return
 
         # 7. Minimum gap between trades — don't open if a trade was opened < 2 min ago
         last_trade_time = self.risk.get_last_trade_time()
@@ -284,15 +284,17 @@ class TradingBot:
                 pass
 
         stake = self.risk.calculate_stake(self._balance)
+        duration = signal.suggested_duration or self.config.duration
+        duration_unit = signal.suggested_duration_unit or self.config.duration_unit
         currency = self.client.account_info.get("currency", self.config.currency)
-        logger.info(f"Placing {signal.signal.name} trade | Stake: {stake:.2f} {currency}")
+        logger.info(f"Placing {signal.signal.name} trade | Stake: {stake:.2f} {currency} | Duration: {duration}{duration_unit}")
 
         try:
             contract = await self.client.buy_contract(
                 symbol=self.config.symbol,
                 contract_type=signal.signal.value,
-                duration=self.config.duration,
-                duration_unit=self.config.duration_unit,
+                duration=duration,
+                duration_unit=duration_unit,
                 amount=stake,
             )
 
@@ -317,6 +319,39 @@ class TradingBot:
 
         except Exception as e:
             logger.error(f"Failed to place trade: {e}")
+
+    async def _check_early_exit(self) -> None:
+        """Sell back contracts that are losing more than 60% of stake to cut losses."""
+        open_positions = self.risk.get_open_positions()
+        if not open_positions:
+            return
+
+        for contract_id, trade in list(open_positions.items()):
+            try:
+                details = await self.client.get_contract(contract_id)
+                status = details.get("status")
+                if status != "open":
+                    continue
+                current_spot = float(details.get("current_spot", 0))
+                bid_price = float(details.get("bid_price", 0))
+                buy_price = float(trade.get("buy_price", trade.get("stake", 0)))
+                if buy_price <= 0:
+                    continue
+                # If we can only recover less than 40% of what we paid, sell early
+                if bid_price > 0 and bid_price < buy_price * 0.40:
+                    logger.warning(
+                        f"Early exit #{contract_id} | bid={bid_price:.2f} < 40% of buy={buy_price:.2f} — selling back"
+                    )
+                    try:
+                        sell_result = await self.client.sell_contract(contract_id, bid_price)
+                        sold_price = float(sell_result.get("sold_for", bid_price))
+                        profit = round(sold_price - buy_price, 2)
+                        self.risk.close_trade(contract_id, sold_price, profit)
+                        logger.info(f"Early exit #{contract_id} | Recovered: {sold_price:.2f} | Loss: {profit:+.2f}")
+                    except Exception as e:
+                        logger.warning(f"Early exit sell failed for {contract_id}: {e}")
+            except Exception as e:
+                logger.debug(f"Early exit check failed for {contract_id}: {e}")
 
     async def _check_open_positions(self) -> None:
         """Detect settled contracts via account statement (primary) and contract poll (fallback)."""
