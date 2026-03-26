@@ -10,7 +10,9 @@ import os
 from aiohttp import web
 
 # ── config ───────────────────────────────────────────────────────────────────
-DATA_DIR = os.environ.get("TRADING_DATA_DIR", "./data")
+_default_data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+_symbol = os.environ.get("TRADING_SYMBOL", "R_25")
+DATA_DIR = os.environ.get("TRADING_DATA_DIR", os.path.join(_default_data_dir, _symbol))
 HOST = os.environ.get("DASHBOARD_HOST", "0.0.0.0")
 PORT = int(os.environ.get("DASHBOARD_PORT", "8080"))
 LOG_TAIL_LINES = 150
