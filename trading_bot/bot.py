@@ -207,11 +207,11 @@ class TradingBot:
                     f"severe pause for 30 cycles (until cycle {self._winrate_pause_until})"
                 )
                 return
-            elif rolling_wr < 0.45 and new_trades_since_pause:
+            elif rolling_wr < 0.40 and new_trades_since_pause:
                 self._winrate_pause_until = self._cycle_count + 10
                 self._winrate_pause_trade_count = current_trade_count
                 logger.warning(
-                    f"Cycle {self._cycle_count}: Rolling win rate {rolling_wr:.0%} < 45% — "
+                    f"Cycle {self._cycle_count}: Rolling win rate {rolling_wr:.0%} < 40% — "
                     f"pause for 10 cycles (until cycle {self._winrate_pause_until})"
                 )
                 return
