@@ -236,14 +236,14 @@ class TradingBot:
                 f"cooldown set for {cooldown_cycles} cycles"
             )
 
-        # 3. Fetch market data (1-minute candles, last 50)
+        # 3. Fetch market data (1-minute candles, last 60 — EMA50 needs 50+)
         candles = await self.client.get_candles(
             symbol=self.config.symbol,
             granularity=60,    # 1-minute candles — aligned with 2-minute contracts
-            count=50,
+            count=60,
         )
 
-        if len(candles) < 30:
+        if len(candles) < 50:
             logger.info(f"Cycle {self._cycle_count}: Insufficient candle data ({len(candles)})")
             return
 

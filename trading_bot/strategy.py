@@ -3,7 +3,7 @@ Trading Strategy - Conservative Scalping for Deriv Synthetic Indices
 
 Strategy: RSI Mean-Reversion + Trend Filter
 - Uses RSI(14) for entry signals
-- Trend filter via EMA(10/20) to only trade in trend direction
+- Trend filter via EMA(10/20/50) to only trade in trend direction
 - 1-minute candles for fast signal alignment with 2-minute contracts
 - Conservative: only trades high-confidence setups
 
@@ -74,6 +74,21 @@ def calculate_ema(prices: List[float], period: int) -> Optional[float]:
     return ema
 
 
+def calculate_ema_series(prices: List[float], period: int) -> List[Optional[float]]:
+    """Calculate EMA for every candle in the series. Returns list of same length as prices."""
+    if len(prices) < period:
+        return [None] * len(prices)
+
+    k = 2 / (period + 1)
+    result = [None] * (period - 1)
+    ema = sum(prices[:period]) / period
+    result.append(ema)
+    for price in prices[period:]:
+        ema = price * k + ema * (1 - k)
+        result.append(ema)
+    return result
+
+
 def calculate_sma(prices: List[float], period: int) -> Optional[float]:
     """Calculate Simple Moving Average."""
     if len(prices) < period:
@@ -99,18 +114,19 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
     Uses 1-minute candles for tight alignment with 2-minute contracts.
 
     Signal quality filters:
-    - EMA spread filter: crossover must be meaningful (not noise)
-    - Candle body confirmation: last candle must close in signal direction
+    - EMA50 macro trend gate: only trade in direction of major trend
+    - EMA spread filter: crossover must be ≥0.05% of price (not noise)
+    - Consecutive candle confirmation: 2 of last 3 candles must close in direction
     - RSI band filter: no BUY when RSI>65 (overbought), no SELL when RSI<35 (oversold)
-    - All paths require confidence >= 0.55 to fire
+    - All paths require confidence >= 0.60 to fire
 
-    Mean-reversion path (BB extreme + RSI extreme → self-sufficient at 0.55):
+    Mean-reversion path (BB extreme + RSI extreme → self-sufficient at 0.60):
       Best for choppy/ranging markets. Uses 5-minute contracts.
 
-    Trend-following path (EMA crossover + slope + RSI mid-range → 0.55):
+    Trend-following path (EMA crossover + macro trend gate + RSI mid-range → 0.60):
       Best for trending markets. Uses 2-minute contracts.
     """
-    if len(candles) < 30:
+    if len(candles) < 50:
         return TradeSignal(Signal.HOLD, 0.0, "Insufficient data", symbol)
 
     # Extract OHLC
@@ -118,34 +134,46 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
     opens = [float(c.get("open", c["close"])) for c in candles]
     current_price = closes[-1]
 
-    # Last candle body direction (confirms momentum)
-    last_candle_bullish = closes[-1] > opens[-1]
-    last_candle_bearish = closes[-1] < opens[-1]
+    # Consecutive candle direction (last 3 candles)
+    candle_dirs = [1 if closes[i] > opens[i] else (-1 if closes[i] < opens[i] else 0)
+                   for i in range(-3, 0)]
+    bullish_candles = sum(1 for d in candle_dirs if d == 1)
+    bearish_candles = sum(1 for d in candle_dirs if d == -1)
+    # 2 of last 3 candles must confirm direction
+    consecutive_bull = bullish_candles >= 2
+    consecutive_bear = bearish_candles >= 2
 
     # Calculate indicators
     rsi = calculate_rsi(closes, period=14)
-    ema20 = calculate_ema(closes, period=20)
-    ema10 = calculate_ema(closes, period=10)
+    ema10_series = calculate_ema_series(closes, period=10)
+    ema20_series = calculate_ema_series(closes, period=20)
+    ema50 = calculate_ema(closes, period=50)
     bb_upper, bb_mid, bb_lower = calculate_bollinger_bands(closes, period=20)
 
-    if any(v is None for v in [rsi, ema20, ema10, bb_upper, bb_lower]):
+    ema10 = ema10_series[-1]
+    ema20 = ema20_series[-1]
+
+    if any(v is None for v in [rsi, ema20, ema10, ema50, bb_upper, bb_lower]):
         return TradeSignal(Signal.HOLD, 0.0, "Indicator calculation failed", symbol)
 
     logger.debug(
         f"{symbol} | Price: {current_price:.5f} | RSI: {rsi:.1f} | "
-        f"EMA10: {ema10:.5f} | EMA20: {ema20:.5f} | "
+        f"EMA10: {ema10:.5f} | EMA20: {ema20:.5f} | EMA50: {ema50:.5f} | "
         f"BB: {bb_lower:.5f}/{bb_mid:.5f}/{bb_upper:.5f}"
     )
 
-    # EMA spread — crossover must be meaningful, not noise
-    # Require EMA10/EMA20 separation of at least 0.02% of price
-    ema_spread_pct = abs(ema10 - ema20) / ema20 * 100
-    ema_spread_sufficient = ema_spread_pct >= 0.02
+    # EMA50 macro trend gate — only trade with the major trend
+    macro_bull = current_price > ema50  # major uptrend
+    macro_bear = current_price < ema50  # major downtrend
 
-    # EMA slope (5-candle lookback — on 1-min candles this is 5 minutes)
-    ema20_prev = calculate_ema(closes[:-5], period=20) if len(closes) > 25 else None
-    trend_up = ema20 > ema20_prev if ema20_prev is not None else False
-    trend_down = ema20 < ema20_prev if ema20_prev is not None else False
+    # EMA spread — crossover must be meaningful, not noise (≥0.05% of price)
+    ema_spread_pct = abs(ema10 - ema20) / ema20 * 100
+    ema_spread_sufficient = ema_spread_pct >= 0.05
+
+    # EMA slope using proper series comparison (5-candle lookback)
+    ema20_5ago = ema20_series[-6] if len(ema20_series) >= 6 and ema20_series[-6] is not None else None
+    trend_up = ema20 > ema20_5ago if ema20_5ago is not None else False
+    trend_down = ema20 < ema20_5ago if ema20_5ago is not None else False
 
     # RSI momentum direction (3-candle lookback)
     rsi_prev = calculate_rsi(closes[:-3], period=14) if len(closes) > 17 else None
@@ -170,25 +198,31 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
         buy_confidence += 0.25
         buy_reasons.append(f"Below BB mid + RSI very oversold ({rsi:.1f})")
 
-    # Trend-following path — requires meaningful EMA crossover + candle confirmation
-    if ema10 > ema20 and ema_spread_sufficient:
-        buy_confidence += 0.25
-        buy_reasons.append("EMA10 > EMA20")
-    if trend_up:
-        buy_confidence += 0.20
-        buy_reasons.append("EMA trend: bullish")
-    # RSI bonus: only when mid-range (not overbought, not oversold)
-    if rsi > 35 and rsi < 65 and trend_up and not rsi_falling:
-        buy_confidence += 0.10
-        buy_reasons.append(f"RSI bullish ({rsi:.1f})")
-    # Last candle confirmation bonus
-    if last_candle_bullish and (ema10 > ema20 or current_price < bb_lower):
-        buy_confidence += 0.05
-        buy_reasons.append("Candle confirms up")
-    # Pullback in uptrend
-    if trend_up and current_price < bb_mid and rsi < 50 and rsi_rising:
-        buy_confidence += 0.10
-        buy_reasons.append("Pullback in uptrend")
+    # Trend-following path — requires macro bull trend + meaningful EMA crossover
+    if macro_bull:
+        if ema10 > ema20 and ema_spread_sufficient:
+            buy_confidence += 0.25
+            buy_reasons.append("EMA10 > EMA20")
+        if trend_up:
+            buy_confidence += 0.15
+            buy_reasons.append("EMA trend: bullish")
+        # RSI bonus: only when mid-range (not overbought, not oversold)
+        if rsi > 40 and rsi < 60 and trend_up and not rsi_falling:
+            buy_confidence += 0.10
+            buy_reasons.append(f"RSI bullish ({rsi:.1f})")
+        # Consecutive candle confirmation
+        if consecutive_bull and (ema10 > ema20 or current_price < bb_lower):
+            buy_confidence += 0.10
+            buy_reasons.append("3-candle momentum up")
+        # Pullback in uptrend
+        if trend_up and current_price < bb_mid and rsi < 50 and rsi_rising:
+            buy_confidence += 0.10
+            buy_reasons.append("Pullback in uptrend")
+    else:
+        # Allow mean-reversion BUY even in macro downtrend (BB extreme)
+        if current_price < bb_lower and rsi < 35:
+            # already scored above — no additional penalty
+            pass
 
     # === SELL confidence ===
     sell_confidence = 0.0
@@ -208,25 +242,30 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
         sell_confidence += 0.25
         sell_reasons.append(f"Above BB mid + RSI very overbought ({rsi:.1f})")
 
-    # Trend-following path — requires meaningful EMA crossover + candle confirmation
-    if ema10 < ema20 and ema_spread_sufficient:
-        sell_confidence += 0.25
-        sell_reasons.append("EMA10 < EMA20")
-    if trend_down:
-        sell_confidence += 0.20
-        sell_reasons.append("EMA trend: bearish")
-    # RSI bonus: only when mid-range (not oversold, not overbought)
-    if rsi > 35 and rsi < 65 and trend_down and not rsi_rising:
-        sell_confidence += 0.10
-        sell_reasons.append(f"RSI bearish ({rsi:.1f})")
-    # Last candle confirmation bonus
-    if last_candle_bearish and (ema10 < ema20 or current_price > bb_upper):
-        sell_confidence += 0.05
-        sell_reasons.append("Candle confirms down")
-    # Spike in downtrend
-    if trend_down and current_price > bb_mid and rsi > 50 and rsi_falling:
-        sell_confidence += 0.10
-        sell_reasons.append("Spike in downtrend")
+    # Trend-following path — requires macro bear trend + meaningful EMA crossover
+    if macro_bear:
+        if ema10 < ema20 and ema_spread_sufficient:
+            sell_confidence += 0.25
+            sell_reasons.append("EMA10 < EMA20")
+        if trend_down:
+            sell_confidence += 0.15
+            sell_reasons.append("EMA trend: bearish")
+        # RSI bonus: only when mid-range (not oversold, not overbought)
+        if rsi > 40 and rsi < 60 and trend_down and not rsi_rising:
+            sell_confidence += 0.10
+            sell_reasons.append(f"RSI bearish ({rsi:.1f})")
+        # Consecutive candle confirmation
+        if consecutive_bear and (ema10 < ema20 or current_price > bb_upper):
+            sell_confidence += 0.10
+            sell_reasons.append("3-candle momentum down")
+        # Spike in downtrend
+        if trend_down and current_price > bb_mid and rsi > 50 and rsi_falling:
+            sell_confidence += 0.10
+            sell_reasons.append("Spike in downtrend")
+    else:
+        # Allow mean-reversion SELL even in macro uptrend (BB extreme)
+        if current_price > bb_upper and rsi > 65:
+            pass
 
     # Determine contract duration:
     # Mean-reversion (BB extreme) → 5-minute contract (needs time to revert)
@@ -234,8 +273,8 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
     buy_is_mean_reversion = current_price < bb_lower
     sell_is_mean_reversion = current_price > bb_upper
 
-    # Single threshold: 0.55 for all signals
-    threshold = 0.55
+    # Threshold: 0.60 for all signals
+    threshold = 0.60
 
     if buy_confidence >= threshold or sell_confidence >= threshold:
         if buy_confidence > sell_confidence and buy_confidence >= threshold:
@@ -251,7 +290,8 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
             return TradeSignal(Signal.BUY, min(buy_confidence, 0.95), " | ".join(buy_reasons), symbol, suggested_duration=5)
 
     logger.info(
-        f"{symbol} HOLD | RSI={rsi:.1f} | BUY={buy_confidence:.2f} ({', '.join(buy_reasons) or 'no conditions'}) | "
+        f"{symbol} HOLD | RSI={rsi:.1f} | macro={'bull' if macro_bull else 'bear'} | "
+        f"BUY={buy_confidence:.2f} ({', '.join(buy_reasons) or 'no conditions'}) | "
         f"SELL={sell_confidence:.2f} ({', '.join(sell_reasons) or 'no conditions'})"
     )
     return TradeSignal(Signal.HOLD, 0.0, "No clear signal", symbol)
