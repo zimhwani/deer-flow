@@ -189,8 +189,8 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
         sell_confidence += 0.65
         sell_reasons.append(f"BB overbought reversal | RSI={rsi:.1f} falling")
 
-    # Path 2 — Trend-following SELL (only in macro downtrend)
-    elif macro_bear:
+    # Path 2 — Trend-following SELL (only in macro downtrend, RSI must be above floor)
+    elif macro_bear and rsi > 45:
         if ema10 < ema20 and ema_spread_ok:
             sell_confidence += 0.30
             sell_reasons.append("EMA10 < EMA20")
