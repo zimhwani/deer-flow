@@ -11,11 +11,11 @@ from aiohttp import web
 
 # ── config ───────────────────────────────────────────────────────────────────
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.environ.get("TRADING_DATA_DIR", os.path.join(_SCRIPT_DIR, "data"))
+SYMBOL = os.environ.get("TRADING_SYMBOL", "R_25")
+DATA_DIR = os.environ.get("TRADING_DATA_DIR", os.path.join(_SCRIPT_DIR, "data", SYMBOL))
 HOST = os.environ.get("DASHBOARD_HOST", "0.0.0.0")
 PORT = int(os.environ.get("DASHBOARD_PORT", "8081"))
 LOG_TAIL_LINES = 150
-SYMBOL = os.environ.get("TRADING_SYMBOL", "R_25")
 STARTING_BALANCE = float(os.environ.get("TRADING_STARTING_BALANCE", "100"))
 DAILY_PROFIT_TARGET_PCT = float(os.environ.get("TRADING_DAILY_TARGET_PCT", "15.0"))
 MAX_DAILY_LOSS_PCT = float(os.environ.get("TRADING_MAX_DAILY_LOSS_PCT", "15.0"))
