@@ -90,7 +90,7 @@ class RiskManager:
             "date": str(date.today()),
             "daily_pnl": self._daily_pnl,
             "balance": self._current_balance,
-            "trade_log": self._trade_log[-100:],
+            "trade_log": self._trade_log,
             "open_positions": list(self._open_positions.values()),
             "last_cooldown_trigger_losses": self._last_cooldown_trigger_losses,
         }

@@ -15,6 +15,10 @@ DATA_DIR = os.environ.get("TRADING_DATA_DIR", os.path.join(_SCRIPT_DIR, "data"))
 HOST = os.environ.get("DASHBOARD_HOST", "0.0.0.0")
 PORT = int(os.environ.get("DASHBOARD_PORT", "8081"))
 LOG_TAIL_LINES = 150
+SYMBOL = os.environ.get("TRADING_SYMBOL", "R_25")
+STARTING_BALANCE = float(os.environ.get("TRADING_STARTING_BALANCE", "100"))
+DAILY_PROFIT_TARGET_PCT = float(os.environ.get("TRADING_DAILY_TARGET_PCT", "15.0"))
+MAX_DAILY_LOSS_PCT = float(os.environ.get("TRADING_MAX_DAILY_LOSS_PCT", "15.0"))
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -62,6 +66,14 @@ async def api_stats(request):
     call_wins = len([t for t in calls if t.get("profit", 0) > 0])
     put_wins  = len([t for t in puts  if t.get("profit", 0) > 0])
 
+    recent_20 = trades[-20:] if len(trades) >= 5 else []
+    rolling_win_rate = (
+        round(len([t for t in recent_20 if t.get("profit", 0) > 0]) / len(recent_20) * 100, 1)
+        if recent_20 else None
+    )
+    profit_target = round(STARTING_BALANCE * DAILY_PROFIT_TARGET_PCT / 100, 2)
+    loss_limit = round(state.get("balance", STARTING_BALANCE) * MAX_DAILY_LOSS_PCT / 100, 2)
+
     consecutive_losses = 0
     for t in reversed(trades):
         if t.get("profit", 0) < 0:
@@ -92,6 +104,10 @@ async def api_stats(request):
         "equity_curve": equity,
         "recent_trades": trades[-20:][::-1],
         "open_positions": open_positions,
+        "rolling_win_rate": rolling_win_rate,
+        "profit_target": profit_target,
+        "loss_limit": loss_limit,
+        "symbol": SYMBOL,
     }
     return web.json_response(payload)
 
@@ -453,7 +469,7 @@ HTML = """<!DOCTYPE html>
     <div class="logo">📈</div>
     <div class="header-title">
       <h1>Tapi's Trading Bot · Real</h1>
-      <p>Deriv · Volatility 25 Index · Live Account</p>
+      <p id="header-subtitle">Deriv · R_25 · Live Account</p>
     </div>
   </div>
   <div class="header-right">
@@ -467,7 +483,7 @@ HTML = """<!DOCTYPE html>
 </header>
 
 <div class="ticker-bar">
-  <div class="ticker-item">Symbol <span>R_25</span></div>
+  <div class="ticker-item">Symbol <span id="ticker-symbol">—</span></div>
   <div class="ticker-item">Today <span id="ticker-date">—</span></div>
   <div class="ticker-item">Daily P&L <span id="ticker-pnl">—</span></div>
   <div class="ticker-item">Win Rate <span id="ticker-wr">—</span></div>
@@ -485,7 +501,13 @@ HTML = """<!DOCTYPE html>
     <span class="icon">💰</span>
     <div class="label">Daily P&L</div>
     <div class="value" id="daily-pnl">—</div>
-    <div class="sub">Today's profit/loss</div>
+    <div class="sub" id="pnl-sub">Today's profit/loss</div>
+    <div style="margin-top:8px;">
+      <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;">
+        <div id="profit-bar" style="height:100%;width:0%;background:var(--green);border-radius:2px;transition:width 0.5s;"></div>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:3px;" id="profit-bar-label">Target: —</div>
+    </div>
   </div>
   <div class="stat-card" style="--accent: var(--cyan)">
     <span class="icon">📊</span>
@@ -563,6 +585,7 @@ HTML = """<!DOCTYPE html>
       <h2>Performance Stats</h2>
     </div>
     <div id="perf-stats" style="display:flex; flex-direction:column; gap:12px; margin-top:4px;">
+      <div class="perf-row" id="pr-rolling-wr"></div>
       <div class="perf-row" id="pr-avg-win"></div>
       <div class="perf-row" id="pr-avg-loss"></div>
       <div class="perf-row" id="pr-profit-factor"></div>
@@ -671,6 +694,24 @@ async function fetchStats() {
     } else {
       clEl.className = 'value red';
       clSub.textContent = 'Cooldown active · ' + cl + ' cycles';
+    }
+
+    // Symbol
+    const sym = d.symbol ?? 'R_?';
+    const symEl = document.getElementById('ticker-symbol');
+    if (symEl) symEl.textContent = sym;
+    const subEl = document.getElementById('header-subtitle');
+    if (subEl) subEl.textContent = 'Deriv · ' + sym + ' · Live Account';
+
+    // Profit target progress bar
+    const profitTarget = d.profit_target ?? 15;
+    const profitBar = document.getElementById('profit-bar');
+    const profitBarLabel = document.getElementById('profit-bar-label');
+    if (profitBar && profitBarLabel) {
+      const pct = Math.min(100, Math.max(0, pnl > 0 ? (pnl / profitTarget) * 100 : 0));
+      profitBar.style.width = pct + '%';
+      profitBar.style.background = pct >= 100 ? 'var(--red)' : pct >= 75 ? 'var(--yellow)' : 'var(--green)';
+      profitBarLabel.textContent = 'Target: +' + profitTarget.toFixed(2) + ' USD (' + Math.round(pct) + '%)';
     }
 
     // Ticker
@@ -836,6 +877,9 @@ async function fetchStats() {
       if (dd > maxDD) maxDD = dd;
     });
 
+    const rwr = d.rolling_win_rate;
+    perfRow('pr-rolling-wr', 'Rolling Win Rate (20)', rwr !== null && rwr !== undefined ? rwr + '%' : '—',
+      rwr >= 50 ? 'green' : rwr >= 40 ? 'yellow' : 'red');
     perfRow('pr-avg-win',      'Avg Win',          closedWins.length  ? '+' + num(avgWin) + ' USD' : '—',  'green');
     perfRow('pr-avg-loss',     'Avg Loss',         closedLoss.length  ? '-' + num(Math.abs(avgLoss)) + ' USD' : '—',  'red');
     perfRow('pr-profit-factor','Profit Factor',    pf,                                                       'cyan');
