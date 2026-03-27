@@ -162,8 +162,8 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
         buy_confidence += 0.65
         buy_reasons.append(f"BB oversold reversal | RSI={rsi:.1f} rising")
 
-    # Path 2 — Trend-following BUY (only in macro uptrend, RSI must be above floor)
-    elif macro_bull and rsi > 28:
+    # Path 2 — Trend-following BUY (only in macro uptrend, RSI must be in active zone)
+    elif macro_bull and rsi > 28 and rsi < 72:
         # Anchor: EMA crossover (required to reach threshold)
         if ema10 > ema20 and ema_spread_ok:
             buy_confidence += 0.30
