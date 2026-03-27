@@ -3,13 +3,13 @@ Trading Strategy - Conservative Scalping for Deriv Synthetic Indices
 
 Strategy: RSI Mean-Reversion + Trend Filter
 - Uses RSI(14) for entry signals
-- Trend filter via EMA(20) to only trade in trend direction
-- Targets short-duration contracts (5 minutes) for quick profit capture
+- Trend filter via EMA(10/20) to only trade in trend direction
+- 1-minute candles for fast signal alignment with 2-minute contracts
 - Conservative: only trades high-confidence setups
 
 Suitable for:
-- Volatility 10 Index (R_10) - lowest volatility synthetic, good for small accounts
-- Volatility 25 Index (R_25) - medium volatility for more opportunities
+- Volatility 50 Index (R_50)
+- Volatility 25 Index (R_25)
 """
 
 import logging
@@ -96,22 +96,31 @@ def calculate_bollinger_bands(prices: List[float], period: int = 20, std_dev: fl
 def generate_signal(candles: list, symbol: str) -> TradeSignal:
     """
     Two-path strategy: mean-reversion (BB-led) and trend-following (EMA-led).
-    BUY and SELL confidence are scored fully and independently; the stronger
-    signal wins. This prevents the EMA trend from permanently blocking
-    counter-trend mean-reversion trades.
+    Uses 1-minute candles for tight alignment with 2-minute contracts.
 
-    Mean-reversion path (trend-independent):
-      Price outside BB + RSI extreme → self-sufficient at 0.55
+    Signal quality filters:
+    - EMA spread filter: crossover must be meaningful (not noise)
+    - Candle body confirmation: last candle must close in signal direction
+    - RSI band filter: no BUY when RSI>65 (overbought), no SELL when RSI<35 (oversold)
+    - All paths require confidence >= 0.55 to fire
 
-    Trend-following path (EMA-dependent):
-      EMA crossover + trend slope + RSI momentum → 0.55 when aligned
+    Mean-reversion path (BB extreme + RSI extreme → self-sufficient at 0.55):
+      Best for choppy/ranging markets. Uses 5-minute contracts.
+
+    Trend-following path (EMA crossover + slope + RSI mid-range → 0.55):
+      Best for trending markets. Uses 2-minute contracts.
     """
     if len(candles) < 30:
         return TradeSignal(Signal.HOLD, 0.0, "Insufficient data", symbol)
 
-    # Extract close prices
+    # Extract OHLC
     closes = [float(c["close"]) for c in candles]
+    opens = [float(c.get("open", c["close"])) for c in candles]
     current_price = closes[-1]
+
+    # Last candle body direction (confirms momentum)
+    last_candle_bullish = closes[-1] > opens[-1]
+    last_candle_bearish = closes[-1] < opens[-1]
 
     # Calculate indicators
     rsi = calculate_rsi(closes, period=14)
@@ -128,22 +137,26 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
         f"BB: {bb_lower:.5f}/{bb_mid:.5f}/{bb_upper:.5f}"
     )
 
-    # Trend direction from 5-candle EMA slope
+    # EMA spread — crossover must be meaningful, not noise
+    # Require EMA10/EMA20 separation of at least 0.02% of price
+    ema_spread_pct = abs(ema10 - ema20) / ema20 * 100
+    ema_spread_sufficient = ema_spread_pct >= 0.02
+
+    # EMA slope (5-candle lookback — on 1-min candles this is 5 minutes)
     ema20_prev = calculate_ema(closes[:-5], period=20) if len(closes) > 25 else None
     trend_up = ema20 > ema20_prev if ema20_prev is not None else False
     trend_down = ema20 < ema20_prev if ema20_prev is not None else False
 
     # RSI momentum direction (3-candle lookback)
-    # Used to distinguish a genuine turning-point from persistent elevated/depressed RSI
     rsi_prev = calculate_rsi(closes[:-3], period=14) if len(closes) > 17 else None
-    rsi_falling = rsi_prev is not None and rsi < rsi_prev  # momentum fading → supports SELL
-    rsi_rising  = rsi_prev is not None and rsi > rsi_prev  # momentum building → supports BUY
+    rsi_falling = rsi_prev is not None and rsi < rsi_prev
+    rsi_rising  = rsi_prev is not None and rsi > rsi_prev
 
-    # === BUY confidence (fully scored before comparing to SELL) ===
+    # === BUY confidence ===
     buy_confidence = 0.0
     buy_reasons = []
 
-    # Mean-reversion path — self-sufficient at price below BB + RSI oversold
+    # Mean-reversion path — price below BB lower + RSI oversold
     if current_price < bb_lower:
         buy_confidence += 0.30
         buy_reasons.append("Price below lower BB")
@@ -157,26 +170,31 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
         buy_confidence += 0.25
         buy_reasons.append(f"Below BB mid + RSI very oversold ({rsi:.1f})")
 
-    # Trend-following path
-    if ema10 > ema20:
+    # Trend-following path — requires meaningful EMA crossover + candle confirmation
+    if ema10 > ema20 and ema_spread_sufficient:
         buy_confidence += 0.25
         buy_reasons.append("EMA10 > EMA20")
     if trend_up:
         buy_confidence += 0.20
         buy_reasons.append("EMA trend: bullish")
+    # RSI bonus: only when mid-range (not overbought, not oversold)
     if rsi > 35 and rsi < 65 and trend_up and not rsi_falling:
         buy_confidence += 0.10
         buy_reasons.append(f"RSI bullish ({rsi:.1f})")
-    # Pullback in uptrend: price below BB mid while overall trend is up, RSI bouncing
+    # Last candle confirmation bonus
+    if last_candle_bullish and (ema10 > ema20 or current_price < bb_lower):
+        buy_confidence += 0.05
+        buy_reasons.append("Candle confirms up")
+    # Pullback in uptrend
     if trend_up and current_price < bb_mid and rsi < 50 and rsi_rising:
         buy_confidence += 0.10
         buy_reasons.append("Pullback in uptrend")
 
-    # === SELL confidence (fully scored before comparing to BUY) ===
+    # === SELL confidence ===
     sell_confidence = 0.0
     sell_reasons = []
 
-    # Mean-reversion path — self-sufficient at price above BB + RSI overbought
+    # Mean-reversion path — price above BB upper + RSI overbought
     if current_price > bb_upper:
         sell_confidence += 0.30
         sell_reasons.append("Price above upper BB")
@@ -190,38 +208,43 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
         sell_confidence += 0.25
         sell_reasons.append(f"Above BB mid + RSI very overbought ({rsi:.1f})")
 
-    # Trend-following path
-    if ema10 < ema20:
+    # Trend-following path — requires meaningful EMA crossover + candle confirmation
+    if ema10 < ema20 and ema_spread_sufficient:
         sell_confidence += 0.25
         sell_reasons.append("EMA10 < EMA20")
     if trend_down:
         sell_confidence += 0.20
         sell_reasons.append("EMA trend: bearish")
+    # RSI bonus: only when mid-range (not oversold, not overbought)
     if rsi > 35 and rsi < 65 and trend_down and not rsi_rising:
         sell_confidence += 0.10
         sell_reasons.append(f"RSI bearish ({rsi:.1f})")
-    # Spike in downtrend: price above BB mid while overall trend is down, RSI turning down
+    # Last candle confirmation bonus
+    if last_candle_bearish and (ema10 < ema20 or current_price > bb_upper):
+        sell_confidence += 0.05
+        sell_reasons.append("Candle confirms down")
+    # Spike in downtrend
     if trend_down and current_price > bb_mid and rsi > 50 and rsi_falling:
         sell_confidence += 0.10
         sell_reasons.append("Spike in downtrend")
 
-    # Determine if mean-reversion (BB extreme) is driving the signal
+    # Determine contract duration:
+    # Mean-reversion (BB extreme) → 5-minute contract (needs time to revert)
+    # Trend-following → 2-minute contract (short, fast signal)
     buy_is_mean_reversion = current_price < bb_lower
     sell_is_mean_reversion = current_price > bb_upper
 
-    # Lower threshold (0.50) when both EMA crossover AND slope agree — two independent confirmations
-    buy_threshold = 0.50 if (ema10 > ema20 and trend_up) else 0.55
-    sell_threshold = 0.50 if (ema10 < ema20 and trend_down) else 0.55
+    # Single threshold: 0.55 for all signals
+    threshold = 0.55
 
-    # Return the stronger signal; both scored in full before deciding
-    if buy_confidence >= buy_threshold or sell_confidence >= sell_threshold:
-        if buy_confidence > sell_confidence and buy_confidence >= buy_threshold:
+    if buy_confidence >= threshold or sell_confidence >= threshold:
+        if buy_confidence > sell_confidence and buy_confidence >= threshold:
             duration = 5 if buy_is_mean_reversion else 2
             return TradeSignal(Signal.BUY, min(buy_confidence, 0.95), " | ".join(buy_reasons), symbol, suggested_duration=duration)
-        if sell_confidence > buy_confidence and sell_confidence >= sell_threshold:
+        if sell_confidence > buy_confidence and sell_confidence >= threshold:
             duration = 5 if sell_is_mean_reversion else 2
             return TradeSignal(Signal.SELL, min(sell_confidence, 0.95), " | ".join(sell_reasons), symbol, suggested_duration=duration)
-        # Equal confidence — BB extreme takes priority as stronger evidence
+        # Equal confidence — BB extreme takes priority
         if current_price > bb_upper:
             return TradeSignal(Signal.SELL, min(sell_confidence, 0.95), " | ".join(sell_reasons), symbol, suggested_duration=5)
         if current_price < bb_lower:

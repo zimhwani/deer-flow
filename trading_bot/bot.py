@@ -236,10 +236,10 @@ class TradingBot:
                 f"cooldown set for {cooldown_cycles} cycles"
             )
 
-        # 3. Fetch market data (5-minute candles, last 50)
+        # 3. Fetch market data (1-minute candles, last 50)
         candles = await self.client.get_candles(
             symbol=self.config.symbol,
-            granularity=300,   # 5-minute candles
+            granularity=60,    # 1-minute candles — aligned with 2-minute contracts
             count=50,
         )
 
