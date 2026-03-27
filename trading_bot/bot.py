@@ -192,7 +192,7 @@ class TradingBot:
                 f"Cycle {self._cycle_count}: Win-rate pause active (cooling until cycle {self._winrate_pause_until})"
             )
             return
-        rolling_wr = self.risk.get_rolling_win_rate(30)
+        rolling_wr = self.risk.get_rolling_win_rate(20)
         if rolling_wr is not None:
             current_trade_count = self.risk.get_stats()["total_trades"]
             # Only re-trigger pause if at least 1 new trade has closed since the last pause.
@@ -200,11 +200,11 @@ class TradingBot:
             # infinite re-trigger loop when the rolling window is frozen with no new data.
             new_trades_since_pause = current_trade_count > self._winrate_pause_trade_count
             if rolling_wr < 0.35 and new_trades_since_pause:
-                self._winrate_pause_until = self._cycle_count + 30
+                self._winrate_pause_until = self._cycle_count + 15
                 self._winrate_pause_trade_count = current_trade_count
                 logger.warning(
                     f"Cycle {self._cycle_count}: Rolling win rate {rolling_wr:.0%} < 35% — "
-                    f"severe pause for 30 cycles (until cycle {self._winrate_pause_until})"
+                    f"severe pause for 15 cycles (until cycle {self._winrate_pause_until})"
                 )
                 return
             elif rolling_wr < 0.40 and new_trades_since_pause:
