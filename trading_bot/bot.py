@@ -329,10 +329,13 @@ class TradingBot:
             logger.error(f"Failed to place trade: {e}")
 
     async def _check_early_exit(self) -> None:
-        """Sell back contracts that are losing badly, but only near expiry."""
+        """Sell back contracts that are losing badly once past 55% of their duration."""
         open_positions = self.risk.get_open_positions()
         if not open_positions:
             return
+
+        import time as _time
+        now_epoch = _time.time()
 
         for contract_id, trade in list(open_positions.items()):
             try:
@@ -341,27 +344,42 @@ class TradingBot:
                 if status != "open":
                     continue
 
-                # Only consider early exit after the contract is 75%+ through its duration.
-                # This prevents cutting winners that are temporarily underwater early on.
-                opened_at_str = trade.get("opened_at")
-                if opened_at_str:
-                    try:
-                        opened_at = datetime.fromisoformat(opened_at_str)
-                        age_seconds = (datetime.utcnow() - opened_at).total_seconds()
-                        if age_seconds < 90:  # Don't exit in the first 90 seconds
-                            continue
-                    except Exception:
-                        pass
+                # Use contract start/expiry from API to compute % elapsed.
+                # This works for any contract duration (2m, 5m, etc.).
+                date_start = float(details.get("date_start") or 0)
+                date_expiry = float(details.get("date_expiry") or 0)
+                if date_start > 0 and date_expiry > date_start:
+                    total_duration = date_expiry - date_start
+                    elapsed = now_epoch - date_start
+                    pct_elapsed = elapsed / total_duration
+                    if pct_elapsed < 0.55:
+                        # Less than 55% through — give trade room to develop
+                        continue
+                    seconds_remaining = max(0, date_expiry - now_epoch)
+                else:
+                    # Fallback: use fixed 60s delay if API times unavailable
+                    opened_at_str = trade.get("opened_at")
+                    if opened_at_str:
+                        try:
+                            opened_at = datetime.fromisoformat(opened_at_str)
+                            age_seconds = (datetime.utcnow() - opened_at).total_seconds()
+                            if age_seconds < 60:
+                                continue
+                        except Exception:
+                            pass
+                    seconds_remaining = 999  # unknown, proceed with check
 
-                current_spot = float(details.get("current_spot", 0))
                 bid_price = float(details.get("bid_price", 0))
                 buy_price = float(trade.get("buy_price", trade.get("stake", 0)))
                 if buy_price <= 0:
                     continue
-                # If we can only recover less than 40% of what we paid, sell early
-                if bid_price > 0 and bid_price < buy_price * 0.40:
+
+                # Exit if bid < 25% of buy price — trade is clearly lost,
+                # recover what little we can rather than going to zero.
+                if bid_price > 0 and bid_price < buy_price * 0.25:
                     logger.warning(
-                        f"Early exit #{contract_id} | bid={bid_price:.2f} < 40% of buy={buy_price:.2f} — selling back"
+                        f"Early exit #{contract_id} | bid={bid_price:.2f} < 25% of buy={buy_price:.2f} "
+                        f"| {seconds_remaining:.0f}s remaining — cutting loss"
                     )
                     try:
                         sell_result = await self.client.sell_contract(contract_id, bid_price)
