@@ -166,9 +166,9 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
     macro_bull = current_price > ema50  # major uptrend
     macro_bear = current_price < ema50  # major downtrend
 
-    # EMA spread — crossover must be meaningful, not noise (≥0.05% of price)
+    # EMA spread — crossover must be meaningful, not noise (≥0.02% of price)
     ema_spread_pct = abs(ema10 - ema20) / ema20 * 100
-    ema_spread_sufficient = ema_spread_pct >= 0.05
+    ema_spread_sufficient = ema_spread_pct >= 0.02
 
     # EMA slope using proper series comparison (5-candle lookback)
     ema20_5ago = ema20_series[-6] if len(ema20_series) >= 6 and ema20_series[-6] is not None else None
