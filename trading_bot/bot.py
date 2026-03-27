@@ -329,7 +329,7 @@ class TradingBot:
             logger.error(f"Failed to place trade: {e}")
 
     async def _check_early_exit(self) -> None:
-        """Sell back contracts that are losing more than 60% of stake to cut losses."""
+        """Sell back contracts that are losing badly, but only near expiry."""
         open_positions = self.risk.get_open_positions()
         if not open_positions:
             return
@@ -340,6 +340,19 @@ class TradingBot:
                 status = details.get("status")
                 if status != "open":
                     continue
+
+                # Only consider early exit after the contract is 75%+ through its duration.
+                # This prevents cutting winners that are temporarily underwater early on.
+                opened_at_str = trade.get("opened_at")
+                if opened_at_str:
+                    try:
+                        opened_at = datetime.fromisoformat(opened_at_str)
+                        age_seconds = (datetime.utcnow() - opened_at).total_seconds()
+                        if age_seconds < 90:  # Don't exit in the first 90 seconds
+                            continue
+                    except Exception:
+                        pass
+
                 current_spot = float(details.get("current_spot", 0))
                 bid_price = float(details.get("bid_price", 0))
                 buy_price = float(trade.get("buy_price", trade.get("stake", 0)))
