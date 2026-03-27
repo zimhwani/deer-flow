@@ -192,7 +192,7 @@ class TradingBot:
                 f"Cycle {self._cycle_count}: Win-rate pause active (cooling until cycle {self._winrate_pause_until})"
             )
             return
-        rolling_wr = self.risk.get_rolling_win_rate(20)
+        rolling_wr = self.risk.get_rolling_win_rate(30)
         if rolling_wr is not None:
             current_trade_count = self.risk.get_stats()["total_trades"]
             # Only re-trigger pause if at least 1 new trade has closed since the last pause.

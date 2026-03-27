@@ -164,7 +164,7 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
     if trend_up:
         buy_confidence += 0.20
         buy_reasons.append("EMA trend: bullish")
-    if rsi > 35 and trend_up and not rsi_falling:
+    if rsi > 35 and rsi < 65 and trend_up and not rsi_falling:
         buy_confidence += 0.10
         buy_reasons.append(f"RSI bullish ({rsi:.1f})")
     # Pullback in uptrend: price below BB mid while overall trend is up, RSI bouncing
@@ -197,7 +197,7 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
     if trend_down:
         sell_confidence += 0.20
         sell_reasons.append("EMA trend: bearish")
-    if rsi < 65 and trend_down and not rsi_rising:
+    if rsi > 35 and rsi < 65 and trend_down and not rsi_rising:
         sell_confidence += 0.10
         sell_reasons.append(f"RSI bearish ({rsi:.1f})")
     # Spike in downtrend: price above BB mid while overall trend is down, RSI turning down
