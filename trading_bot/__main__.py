@@ -12,6 +12,21 @@ import sys
 # Ensure parent dir is on path when run directly
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+# Load .env from the trading_bot directory (if present)
+_env_path = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.exists(_env_path):
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(_env_path)
+    except ImportError:
+        # Fallback: parse manually if python-dotenv not installed
+        with open(_env_path) as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if _line and not _line.startswith("#") and "=" in _line:
+                    _k, _, _v = _line.partition("=")
+                    os.environ.setdefault(_k.strip(), _v.strip())
+
 from trading_bot.bot import main
 
 if __name__ == "__main__":
