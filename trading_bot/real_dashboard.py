@@ -82,10 +82,13 @@ async def api_stats(request):
             break
 
     equity = []
+    balance_curve = []
     running = 0.0
+    current_balance = state.get("balance", 0.0)
     for t in trades:
         running += t.get("profit", 0)
         equity.append({"time": t.get("closed_at", ""), "equity": round(running, 2)})
+        balance_curve.append({"time": t.get("closed_at", ""), "balance": round(current_balance - total_profit + running, 2)})
 
     payload = {
         "date": state.get("date", ""),
@@ -102,6 +105,7 @@ async def api_stats(request):
         "put_wins": put_wins,
         "consecutive_losses": consecutive_losses,
         "equity_curve": equity,
+        "balance_curve": balance_curve,
         "recent_trades": trades[-20:][::-1],
         "open_positions": open_positions,
         "rolling_win_rate": rolling_win_rate,
@@ -539,7 +543,10 @@ HTML = """<!DOCTYPE html>
   <div class="panel">
     <div class="panel-header">
       <h2>Equity Curve</h2>
-      <span class="badge" id="eq-badge">Cumulative P&L</span>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <span class="badge" id="eq-badge">Cumulative P&L</span>
+        <button id="chart-toggle" onclick="toggleChartView()" style="font-size:10px;padding:2px 10px;border-radius:10px;background:var(--surface2);border:1px solid var(--border2);color:var(--muted);cursor:pointer;font-family:inherit;">Balance</button>
+      </div>
     </div>
     <div class="chart-wrap"><canvas id="equity-chart"></canvas></div>
   </div>
@@ -622,6 +629,38 @@ HTML = """<!DOCTYPE html>
 <script>
 let equityChart = null;
 let dirChart = null;
+let chartMode = 'pnl'; // 'pnl' or 'balance'
+let _lastEquityData = null;
+let _lastBalanceData = null;
+
+function toggleChartView() {
+  chartMode = chartMode === 'pnl' ? 'balance' : 'pnl';
+  const btn = document.getElementById('chart-toggle');
+  const badge = document.getElementById('eq-badge');
+  if (chartMode === 'balance') {
+    btn.textContent = 'P&L';
+    badge.textContent = 'Account Balance';
+  } else {
+    btn.textContent = 'Balance';
+    badge.textContent = 'Cumulative P&L';
+  }
+  if (_lastEquityData && _lastBalanceData) applyChartData();
+}
+
+function applyChartData() {
+  const data = chartMode === 'balance' ? _lastBalanceData : _lastEquityData;
+  const labels = data.map(e => fmtTime(e.time));
+  const values = data.map(e => chartMode === 'balance' ? e.balance : e.equity);
+  const lastVal = values.length ? values[values.length - 1] : 0;
+  const isPos = chartMode === 'pnl' ? lastVal >= 0 : true;
+  const lineColor = isPos ? '#10b981' : '#f43f5e';
+  if (equityChart) {
+    equityChart.data.labels = labels;
+    equityChart.data.datasets[0].data = values;
+    equityChart.data.datasets[0].borderColor = lineColor;
+    equityChart.update('none');
+  }
+}
 
 function num(val, decimals=2) {
   return Math.abs(val).toLocaleString('en-US', {minimumFractionDigits: decimals, maximumFractionDigits: decimals});
@@ -720,23 +759,26 @@ async function fetchStats() {
     document.getElementById('ticker-wr').textContent = wr + '%';
     document.getElementById('ticker-trades').textContent = d.total_trades ?? 0;
 
-    // Equity chart
-    const labels = (d.equity_curve ?? []).map(e => fmtTime(e.time));
-    const values = (d.equity_curve ?? []).map(e => e.equity);
+    // Equity / Balance chart
+    _lastEquityData  = d.equity_curve  ?? [];
+    _lastBalanceData = d.balance_curve ?? [];
+    const activeData = chartMode === 'balance' ? _lastBalanceData : _lastEquityData;
+    const labels = activeData.map(e => fmtTime(e.time));
+    const values = activeData.map(e => chartMode === 'balance' ? e.balance : e.equity);
     const lastVal = values.length ? values[values.length - 1] : 0;
-    const lineColor = lastVal >= 0 ? '#10b981' : '#f43f5e';
+    const lineColor = chartMode === 'pnl' ? (lastVal >= 0 ? '#10b981' : '#f43f5e') : '#10b981';
 
     if (!equityChart) {
       const ctx = document.getElementById('equity-chart').getContext('2d');
       const grad = ctx.createLinearGradient(0, 0, 0, 210);
-      grad.addColorStop(0, lastVal >= 0 ? 'rgba(16,185,129,0.2)' : 'rgba(244,63,94,0.2)');
+      grad.addColorStop(0, 'rgba(16,185,129,0.2)');
       grad.addColorStop(1, 'rgba(0,0,0,0)');
       equityChart = new Chart(ctx, {
         type: 'line',
         data: {
           labels,
           datasets: [{
-            label: 'P&L (USD)',
+            label: 'USD',
             data: values,
             borderColor: lineColor,
             backgroundColor: grad,
@@ -753,21 +795,18 @@ async function fetchStats() {
             legend: { display: false },
             tooltip: {
               callbacks: {
-                label: ctx => ' ' + fmt(ctx.parsed.y) + ' USD'
+                label: ctx => ' $' + ctx.parsed.y.toFixed(2) + ' USD'
               }
             }
           },
           scales: {
             x: { ticks: { color: '#475569', maxTicksLimit: 6, font: { size: 10, family: 'JetBrains Mono' } }, grid: { color: '#0f172a' } },
-            y: { ticks: { color: '#475569', font: { size: 10, family: 'JetBrains Mono' }, callback: v => fmt(v) }, grid: { color: '#0f172a' } }
+            y: { ticks: { color: '#475569', font: { size: 10, family: 'JetBrains Mono' }, callback: v => chartMode === 'balance' ? '$' + v.toFixed(0) : fmt(v) }, grid: { color: '#0f172a' } }
           }
         }
       });
     } else {
-      equityChart.data.labels = labels;
-      equityChart.data.datasets[0].data = values;
-      equityChart.data.datasets[0].borderColor = lineColor;
-      equityChart.update('none');
+      applyChartData();
     }
 
     // CALL / PUT performance chart
