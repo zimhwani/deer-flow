@@ -305,28 +305,42 @@ class TradingBot:
                 duration_unit=duration_unit,
                 amount=stake,
             )
-
-            self.risk.register_trade(
-                contract_id=contract["contract_id"],
-                contract_type=signal.signal.value,
-                symbol=self.config.symbol,
-                stake=stake,
-                payout=float(contract.get("payout", 0)),
-                buy_price=float(contract.get("buy_price", stake)),
-            )
-
-            # Record direction for whipsaw filter
-            self._last_trade_direction = signal.signal
-            self._last_trade_cycle = self._cycle_count
-
-            # Subscribe to real-time settlement updates
+        except TimeoutError as e:
+            logger.warning(f"Proposal timed out, retrying once in 3s: {e}")
+            await asyncio.sleep(3)
             try:
-                await self.client.subscribe_contract_updates(contract["contract_id"])
-            except Exception as e:
-                logger.warning(f"Contract subscription failed, will fall back to polling: {e}")
-
+                contract = await self.client.buy_contract(
+                    symbol=self.config.symbol,
+                    contract_type=signal.signal.value,
+                    duration=duration,
+                    duration_unit=duration_unit,
+                    amount=stake,
+                )
+            except Exception as retry_e:
+                logger.error(f"Failed to place trade after retry: {retry_e}")
+                return
         except Exception as e:
             logger.error(f"Failed to place trade: {e}")
+            return
+
+        self.risk.register_trade(
+            contract_id=contract["contract_id"],
+            contract_type=signal.signal.value,
+            symbol=self.config.symbol,
+            stake=stake,
+            payout=float(contract.get("payout", 0)),
+            buy_price=float(contract.get("buy_price", stake)),
+        )
+
+        # Record direction for whipsaw filter
+        self._last_trade_direction = signal.signal
+        self._last_trade_cycle = self._cycle_count
+
+        # Subscribe to real-time settlement updates
+        try:
+            await self.client.subscribe_contract_updates(contract["contract_id"])
+        except Exception as e:
+            logger.warning(f"Contract subscription failed, will fall back to polling: {e}")
 
     async def _check_early_exit(self) -> None:
         """Sell back contracts that are losing badly once past 55% of their duration."""
