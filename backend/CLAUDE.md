@@ -45,7 +45,7 @@ deer-flow/
 │   │           ├── models/            # Model factory with thinking/vision support
 │   │           ├── skills/            # Skills discovery, loading, parsing
 │   │           ├── config/            # Configuration system (app, model, sandbox, tool, etc.)
-│   │           ├── community/         # Community tools (tavily, jina_ai, firecrawl, image_search, aio_sandbox)
+│   │           ├── community/         # Community tools (tavily, jina_ai, firecrawl, image_search, bitget, aio_sandbox)
 │   │           ├── reflection/        # Dynamic module loading (resolve_variable, resolve_class)
 │   │           ├── utils/             # Utilities (network, readability)
 │   │           └── client.py          # Embedded Python client (DeerFlowClient)
@@ -259,6 +259,7 @@ Proxied through nginx: `/api/langgraph/*` → LangGraph, all other `/api/*` → 
 - `jina_ai/` - Web fetch via Jina reader API with readability extraction
 - `firecrawl/` - Web scraping via Firecrawl API
 - `image_search/` - Image search via DuckDuckGo
+- `bitget/` - Bitget exchange API integration for copy trading analysis (account, positions, copy trade history, trader stats)
 
 ### MCP System (`packages/harness/deerflow/mcp/`)
 

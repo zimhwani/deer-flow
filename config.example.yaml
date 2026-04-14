@@ -221,6 +221,14 @@ tools:
   #   # Image size filter. Options: "l" (large), "m" (medium), "i" (icon).
   #   image_size: "i"
 
+  # Bitget copy trading analysis tool (requires Bitget API credentials)
+  # - name: bitget_copy_analysis
+  #   group: web
+  #   use: deerflow.community.bitget.tools:bitget_copy_analysis_tool
+  #   api_key: $BITGET_API_KEY
+  #   api_secret: $BITGET_API_SECRET
+  #   passphrase: $BITGET_PASSPHRASE
+
   # File operations tools
   - name: ls
     group: file:read
