@@ -1,7 +1,8 @@
 ---
 name: copy-trading-analysis
-description: Analyze copy trading performance and execute independent trades on MT5 (Deriv). Use this skill when the user asks about their trading, wants to manage positions, analyze trade history, calculate risk, or transition from copy trading to independent trading. Also covers Bitget copy trade analysis for evaluating traders and profit share costs.
+description: Analyze copy trading performance and execute independent trades on Deriv (or MT5). Use this skill when the user asks about their trading, wants to manage positions, analyze trade history, or transition from copy trading to independent trading. Also covers Bitget copy trade analysis for evaluating traders and profit share costs.
 allowed-tools:
+  - deriv_trade
   - mt5_trade
   - bitget_copy_analysis
   - web_search
@@ -11,26 +12,71 @@ allowed-tools:
   - read_file
 ---
 
-# Copy Trading Analysis & MT5 Trading Skill
+# Copy Trading Analysis & Trading Skill
 
 ## Overview
 
-This skill provides two integrated capabilities:
-1. **MT5 Trading** — Trade independently on MetaTrader 5 (Deriv, Exness, IC Markets) with full position management, risk calculation, and performance analysis
-2. **Bitget Copy Trade Analysis** — Pull and analyze copy trading data to understand what you're paying and whether the strategy is replicable
+This skill provides three integrated capabilities:
+1. **Deriv Trading** (recommended) — Trade on Deriv via WebSocket API from any OS (Linux, Mac, Windows). No MT5 terminal needed.
+2. **MT5 Trading** — Trade on MetaTrader 5 (Windows only, requires MT5 terminal)
+3. **Bitget Copy Trade Analysis** — Pull and analyze copy trading data to understand profit share costs and strategy replicability
 
 ## When to Use This Skill
 
-- User wants to place trades, check positions, or manage orders on MT5
+- User wants to place trades, check positions, or manage orders on Deriv
 - User asks about their trading performance or account status
-- User wants to calculate position sizes based on risk percentage
 - User asks about their copy trading costs on Bitget
 - User wants to evaluate whether to keep following a trader vs trading independently
 - User wants a breakdown of profit share fees vs independent trading savings
 
 ---
 
-## MT5 Trading Tool
+## Deriv Trading Tool (Any OS)
+
+Use the `deriv_trade` tool. **Always confirm with the user before executing trade actions.**
+
+### Read Actions (safe)
+
+| Action | What It Does | Required Params |
+|--------|-------------|-----------------|
+| `balance` | Account balance and currency | — |
+| `portfolio` | All open positions with PnL | — |
+| `profit_table` | Trade history + analysis | `limit` (default 50) |
+| `statement` | Full transaction log | `limit` (default 50) |
+| `tick` | Current bid/ask price | `symbol` |
+| `symbols` | List all tradeable symbols | — |
+| `proposal` | Get price quote before buying | `symbol`, `contract_type`, `amount`, `duration` |
+| `full_report` | Balance + portfolio + history | — |
+
+### Trade Actions (require user confirmation)
+
+| Action | What It Does | Required Params |
+|--------|-------------|-----------------|
+| `buy` | Buy a contract | `symbol`, `contract_type`, `amount`, `duration` |
+| `sell` | Close a position | `contract_id` |
+| `sell_all` | Close all positions | — |
+
+### Common Contract Types
+
+- `CALL` — Rise/Up (profit if price goes up)
+- `PUT` — Fall/Down (profit if price goes down)
+- `MULTUP` — Multiplier Up (leveraged, profit if price rises)
+- `MULTDOWN` — Multiplier Down (leveraged, profit if price falls)
+
+### Trading Workflow
+
+```
+1. deriv_trade(action="symbols")                    → Find the right symbol
+2. deriv_trade(action="tick", symbol="R_100")       → Check current price
+3. deriv_trade(action="proposal", symbol="R_100", contract_type="CALL", amount=10, duration=5, duration_unit="m")
+   → Get price quote
+4. Confirm with user: "Buy $10 CALL on Volatility 100 for 5 minutes?"
+5. deriv_trade(action="buy", symbol="R_100", contract_type="CALL", amount=10, duration=5, duration_unit="m")
+```
+
+---
+
+## MT5 Trading Tool (Windows only)
 
 Use the `mt5_trade` tool. **Always confirm with the user before executing trade actions.**
 

@@ -239,6 +239,14 @@ tools:
   #   server: $MT5_SERVER           # Broker server, e.g. "Deriv-Demo"
   #   terminal_path: ""             # Optional: path to MT5 terminal64.exe
 
+  # Deriv trading tool (works on any OS — Linux, Mac, Windows)
+  # Uses Deriv WebSocket API. Get token at https://app.deriv.com/account/api-token
+  # - name: deriv_trade
+  #   group: web
+  #   use: deerflow.community.deriv.tools:deriv_trade_tool
+  #   api_token: $DERIV_API_TOKEN
+  #   app_id: "1089"               # Optional: your Deriv app ID
+
   # File operations tools
   - name: ls
     group: file:read
