@@ -5,10 +5,12 @@ Async client that maintains a persistent connection with automatic
 keepalive pings and request/response correlation via req_id.
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
-from typing import Any
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 

@@ -1,5 +1,4 @@
-"""
-Trend-following trading strategy using EMA crossover.
+"""Trend-following trading strategy using EMA crossover.
 
 Logic:
 - Compute fast EMA (8-period) and slow EMA (21-period) from candle closes
@@ -8,6 +7,8 @@ Logic:
 - Only one position open at a time
 - Fixed stake per trade, configurable duration
 """
+
+from __future__ import annotations
 
 import logging
 
