@@ -12,7 +12,7 @@ from typing import Optional
 
 from websockets.exceptions import ConnectionClosed
 
-from .config import TradingConfig, load_config
+from .config import TradingConfig, get_symbols, load_config
 from .deriv_client import DerivClient
 from .risk_manager import RiskManager
 from .strategy import Signal, generate_signal
@@ -54,6 +54,9 @@ class TradingBot:
         # Whipsaw filter — suppress rapid direction flips
         self._last_trade_direction: Optional[Signal] = None
         self._last_trade_cycle: int = 0
+        # Multi-symbol rotation
+        self._symbols = get_symbols(config)
+        self._symbol_index: int = 0
 
     async def start(self) -> None:
         """Start the bot with automatic reconnection."""
@@ -62,7 +65,7 @@ class TradingBot:
 
         logger.info("=" * 60)
         logger.info("  Deriv.com Trading Bot Starting")
-        logger.info(f"  Symbol:    {self.config.symbol}")
+        logger.info(f"  Symbols:   {', '.join(self._symbols)}")
         logger.info(f"  Currency:  {self.config.currency}")
         logger.info(f"  Max risk:  {self.config.max_risk_per_trade_pct}% per trade")
         logger.info(f"  Interval:  {self.config.polling_interval_seconds}s")
@@ -172,8 +175,17 @@ class TradingBot:
             wait = max(0, self.config.polling_interval_seconds - elapsed)
             await asyncio.sleep(wait)
 
+    def _next_symbol(self) -> str:
+        """Rotate to the next symbol in the list."""
+        symbol = self._symbols[self._symbol_index % len(self._symbols)]
+        self._symbol_index += 1
+        return symbol
+
     async def _run_cycle(self) -> None:
         """Single analysis and trade cycle."""
+        # 0. Pick the next symbol to analyze
+        symbol = self._next_symbol()
+
         # 1. Always check open positions first so expired contracts are settled
         await self._check_open_positions()
 
@@ -238,17 +250,17 @@ class TradingBot:
 
         # 3. Fetch market data (1-minute candles, last 60 — EMA50 needs 50+)
         candles = await self.client.get_candles(
-            symbol=self.config.symbol,
+            symbol=symbol,
             granularity=60,    # 1-minute candles — aligned with 2-minute contracts
             count=60,
         )
 
         if len(candles) < 50:
-            logger.info(f"Cycle {self._cycle_count}: Insufficient candle data ({len(candles)})")
+            logger.info(f"Cycle {self._cycle_count}: [{symbol}] Insufficient candle data ({len(candles)})")
             return
 
         # 4. Generate signal
-        signal = generate_signal(candles, self.config.symbol)
+        signal = generate_signal(candles, symbol)
         logger.info(
             f"Cycle {self._cycle_count}: Signal={signal.signal.name} "
             f"Confidence={signal.confidence:.0%} | {signal.reason}"
@@ -295,11 +307,11 @@ class TradingBot:
         duration = signal.suggested_duration or self.config.duration
         duration_unit = signal.suggested_duration_unit or self.config.duration_unit
         currency = self.client.account_info.get("currency", self.config.currency)
-        logger.info(f"Placing {signal.signal.name} trade | Stake: {stake:.2f} {currency} | Duration: {duration}{duration_unit}")
+        logger.info(f"Placing {signal.signal.name} trade on {symbol} | Stake: {stake:.2f} {currency} | Duration: {duration}{duration_unit}")
 
         try:
             contract = await self.client.buy_contract(
-                symbol=self.config.symbol,
+                symbol=symbol,
                 contract_type=signal.signal.value,
                 duration=duration,
                 duration_unit=duration_unit,
@@ -310,7 +322,7 @@ class TradingBot:
             await asyncio.sleep(3)
             try:
                 contract = await self.client.buy_contract(
-                    symbol=self.config.symbol,
+                    symbol=symbol,
                     contract_type=signal.signal.value,
                     duration=duration,
                     duration_unit=duration_unit,
@@ -326,7 +338,7 @@ class TradingBot:
         self.risk.register_trade(
             contract_id=contract["contract_id"],
             contract_type=signal.signal.value,
-            symbol=self.config.symbol,
+            symbol=symbol,
             stake=stake,
             payout=float(contract.get("payout", 0)),
             buy_price=float(contract.get("buy_price", stake)),

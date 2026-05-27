@@ -27,7 +27,8 @@ class TradingConfig:
     risk_reward_ratio: float = 2.0          # Target 1:2 risk/reward
 
     # Strategy settings
-    symbol: str = "R_25"                    # Volatility 25 Index (medium volatility synthetic)
+    symbol: str = "R_25"                    # Primary symbol (used if symbols list is empty)
+    symbols: str = ""                       # Comma-separated list of symbols to rotate through
     contract_type: str = "CALL"             # CALL/PUT
     duration: int = 5                       # Contract duration in minutes
     duration_unit: str = "m"               # m=minutes, t=ticks, s=seconds, h=hours, d=days
@@ -64,6 +65,7 @@ def load_config(config_path: Optional[str] = None) -> TradingConfig:
         "TRADING_CURRENCY": "currency",
         "TRADING_STARTING_BALANCE": "starting_balance",
         "TRADING_SYMBOL": "symbol",
+        "TRADING_SYMBOLS": "symbols",
         "TRADING_DURATION": "duration",
         "TRADING_MAX_RISK_PCT": "max_risk_per_trade_pct",
         "TRADING_MAX_DAILY_LOSS_PCT": "max_daily_loss_pct",
@@ -87,4 +89,14 @@ def load_config(config_path: Optional[str] = None) -> TradingConfig:
     if not cfg.data_dir:
         cfg.data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
+    # Build symbols list: TRADING_SYMBOLS takes priority, falls back to single TRADING_SYMBOL
+    if not cfg.symbols and cfg.symbol:
+        cfg.symbols = cfg.symbol
+
     return cfg
+
+
+def get_symbols(cfg: TradingConfig) -> list:
+    """Return list of symbols to trade, parsed from comma-separated config."""
+    raw = cfg.symbols or cfg.symbol
+    return [s.strip() for s in raw.split(",") if s.strip()]
