@@ -229,6 +229,16 @@ tools:
   #   api_secret: $BITGET_API_SECRET
   #   passphrase: $BITGET_PASSPHRASE
 
+  # MetaTrader 5 trading tool (requires MT5 terminal running on Windows)
+  # Supports Deriv, Exness, IC Markets, and any MT5 broker.
+  # - name: mt5_trade
+  #   group: web
+  #   use: deerflow.community.mt5.tools:mt5_trade_tool
+  #   account: $MT5_ACCOUNT        # MT5 account number
+  #   password: $MT5_PASSWORD       # MT5 account password
+  #   server: $MT5_SERVER           # Broker server, e.g. "Deriv-Demo"
+  #   terminal_path: ""             # Optional: path to MT5 terminal64.exe
+
   # File operations tools
   - name: ls
     group: file:read
