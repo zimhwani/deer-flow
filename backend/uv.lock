@@ -720,6 +720,7 @@ dependencies = [
     { name = "readabilipy" },
     { name = "tavily-python" },
     { name = "tiktoken" },
+    { name = "websockets" },
 ]
 
 [package.metadata]
@@ -750,6 +751,7 @@ requires-dist = [
     { name = "readabilipy", specifier = ">=0.3.0" },
     { name = "tavily-python", specifier = ">=0.7.17" },
     { name = "tiktoken", specifier = ">=0.8.0" },
+    { name = "websockets", specifier = ">=13.0" },
 ]
 
 [[package]]
