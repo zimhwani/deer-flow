@@ -1,0 +1,18 @@
+[Unit]
+Description=DeerFlow Trading Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/user/deer-flow/trading_bot
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+EnvironmentFile=/home/user/deer-flow/trading_bot/.env
+ExecStart=/usr/bin/python3 /home/user/deer-flow/trading_bot/bot.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
