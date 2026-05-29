@@ -43,6 +43,9 @@ input double InpDailyLossPct   = 10.0; // Daily loss limit % of balance
 input bool   InpUseDailyTarget = false; // Enable daily profit target
 input double InpDailyTargetPct = 999.0; // Daily profit target %
 
+input group "Dashboard Bridge"
+input string InpDashboardUrl   = "http://209.38.87.199/api/mt5/trade"; // Dashboard URL (empty to disable)
+
 input group "EA Settings"
 input int    InpMagicNumber    = 20260528; // Magic number (unique ID)
 input bool   InpTradeOnNewBar  = true;  // Only trade on new M1 bar open
@@ -233,6 +236,22 @@ void OnTick()
 }
 
 //+------------------------------------------------------------------+
+// Posts a JSON payload to the dashboard. Requires the URL to be
+// whitelisted in MT5 → Tools → Options → Expert Advisors → Allow WebRequests.
+void PostToDashboard(string json)
+{
+   if(StringLen(InpDashboardUrl) < 8) return;
+   char   post[], result[];
+   string headers = "Content-Type: application/json\r\n";
+   string resultHeaders;
+   int    len = StringToCharArray(json, post) - 1;  // strip null terminator
+   ArrayResize(post, len);
+   int res = WebRequest("POST", InpDashboardUrl, headers, 5000, post, result, resultHeaders);
+   if(res < 0)
+      PrintFormat("Dashboard POST failed (err=%d) — add URL to MT5 WebRequests allowlist", GetLastError());
+}
+
+//+------------------------------------------------------------------+
 void OpenBuy(int slPoints, int tpPoints, string reason)
 {
    double ask  = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
@@ -242,8 +261,15 @@ void OpenBuy(int slPoints, int tpPoints, string reason)
    double lots = NormaliseLots(InpLotSize);
 
    if(trade.Buy(lots, _Symbol, ask, sl, tp,
-                StringFormat("DeerFlow BUY %s conf=%.0f%%", reason, 0)))
+                StringFormat("DeerFlow BUY %s", reason)))
+   {
       PrintFormat("BUY %s opened | lots=%.2f ask=%.5f SL=%.5f TP=%.5f", reason, lots, ask, sl, tp);
+      PostToDashboard(StringFormat(
+         "{\"type\":\"open\",\"direction\":\"BUY\",\"symbol\":\"%s\",\"lots\":%.2f,"
+         "\"price\":%.5f,\"sl\":%.5f,\"tp\":%.5f,\"reason\":\"%s\",\"time\":\"%s\"}",
+         _Symbol, lots, ask, sl, tp, reason,
+         TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES|TIME_SECONDS)));
+   }
    else
       PrintFormat("BUY failed: %d %s", trade.ResultRetcode(), trade.ResultRetcodeDescription());
 }
@@ -259,9 +285,43 @@ void OpenSell(int slPoints, int tpPoints, string reason)
 
    if(trade.Sell(lots, _Symbol, bid, sl, tp,
                  StringFormat("DeerFlow SELL %s", reason)))
+   {
       PrintFormat("SELL %s opened | lots=%.2f bid=%.5f SL=%.5f TP=%.5f", reason, lots, bid, sl, tp);
+      PostToDashboard(StringFormat(
+         "{\"type\":\"open\",\"direction\":\"SELL\",\"symbol\":\"%s\",\"lots\":%.2f,"
+         "\"price\":%.5f,\"sl\":%.5f,\"tp\":%.5f,\"reason\":\"%s\",\"time\":\"%s\"}",
+         _Symbol, lots, bid, sl, tp, reason,
+         TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES|TIME_SECONDS)));
+   }
    else
       PrintFormat("SELL failed: %d %s", trade.ResultRetcode(), trade.ResultRetcodeDescription());
+}
+
+//+------------------------------------------------------------------+
+// Fires when a deal is added to history — catches trade closes.
+void OnTradeTransaction(const MqlTradeTransaction& trans,
+                        const MqlTradeRequest&     request,
+                        const MqlTradeResult&      result)
+{
+   if(trans.type != TRADE_TRANSACTION_DEAL_ADD) return;
+   if(!HistoryDealSelect(trans.deal))           return;
+
+   long magic = HistoryDealGetInteger(trans.deal, DEAL_MAGIC);
+   if(magic != InpMagicNumber) return;
+
+   long entry = HistoryDealGetInteger(trans.deal, DEAL_ENTRY);
+   if(entry != DEAL_ENTRY_OUT) return;
+
+   string sym    = HistoryDealGetString(trans.deal,  DEAL_SYMBOL);
+   double profit = HistoryDealGetDouble(trans.deal,  DEAL_PROFIT);
+   double vol    = HistoryDealGetDouble(trans.deal,  DEAL_VOLUME);
+   double price  = HistoryDealGetDouble(trans.deal,  DEAL_PRICE);
+
+   PostToDashboard(StringFormat(
+      "{\"type\":\"close\",\"symbol\":\"%s\",\"profit\":%.2f,\"lots\":%.2f,"
+      "\"price\":%.5f,\"time\":\"%s\"}",
+      sym, profit, vol, price,
+      TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES|TIME_SECONDS)));
 }
 
 //+------------------------------------------------------------------+
