@@ -21,7 +21,7 @@ class TradingConfig:
     starting_balance: float = 100.0
 
     # Risk management
-    max_risk_per_trade_pct: float = 1.0     # Max 1% of balance per trade
+    max_risk_per_trade_pct: float = 2.0     # Max 2% of balance per trade
     max_daily_loss_pct: float = 5.0         # Stop trading if down 5% today
     max_open_positions: int = 3             # Max concurrent trades
     risk_reward_ratio: float = 2.0          # Target 1:2 risk/reward
