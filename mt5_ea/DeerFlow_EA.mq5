@@ -252,10 +252,21 @@ void PostToDashboard(string json)
 }
 
 //+------------------------------------------------------------------+
+// Returns the minimum stop distance in points, with a small buffer.
+int MinStopPoints()
+{
+   int stopLevel = (int)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   return stopLevel + 10;  // 10-point buffer above the minimum
+}
+
+//+------------------------------------------------------------------+
 void OpenBuy(int slPoints, int tpPoints, string reason)
 {
    double ask  = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double pt   = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   int    minSL = MinStopPoints();
+   slPoints = MathMax(slPoints, minSL);
+   tpPoints = MathMax(tpPoints, minSL);
    double sl   = ask - slPoints * pt;
    double tp   = ask + tpPoints * pt;
    double lots = NormaliseLots(InpLotSize);
@@ -279,6 +290,9 @@ void OpenSell(int slPoints, int tpPoints, string reason)
 {
    double bid  = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double pt   = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   int    minSL = MinStopPoints();
+   slPoints = MathMax(slPoints, minSL);
+   tpPoints = MathMax(tpPoints, minSL);
    double sl   = bid + slPoints * pt;
    double tp   = bid - tpPoints * pt;
    double lots = NormaliseLots(InpLotSize);
