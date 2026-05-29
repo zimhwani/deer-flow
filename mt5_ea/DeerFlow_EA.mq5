@@ -246,9 +246,9 @@ void PostToDashboard(string json)
    string resultHeaders;
    int    len = StringToCharArray(json, post) - 1;  // strip null terminator
    ArrayResize(post, len);
+   PrintFormat("Dashboard POST attempt: %s", InpDashboardUrl);
    int res = WebRequest("POST", InpDashboardUrl, headers, 5000, post, result, resultHeaders);
-   if(res < 0)
-      PrintFormat("Dashboard POST failed (err=%d) — add URL to MT5 WebRequests allowlist", GetLastError());
+   PrintFormat("Dashboard POST result: http=%d err=%d body=%s", res, GetLastError(), CharArrayToString(result));
 }
 
 //+------------------------------------------------------------------+
