@@ -34,7 +34,7 @@ class TradingConfig:
     duration_unit: str = "m"               # m=minutes, t=ticks, s=seconds, h=hours, d=days
 
     # Portfolio targets
-    daily_profit_target_pct: float = 15.0  # Lock in gains if up 15% today ($15 on $100 principal)
+    daily_profit_target_pct: float = 7.0   # Lock in gains if up 7% today
     weekly_profit_target_pct: float = 10.0 # Weekly target
 
     # Operational settings
