@@ -126,10 +126,10 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
     trend_up   = ema20 > ema20_5ago if ema20_5ago else False
     trend_down = ema20 < ema20_5ago if ema20_5ago else False
 
-    # RSI direction (3-candle lookback)
+    # RSI direction (3-candle lookback) — must have moved ≥3 points to count as genuine reversal
     rsi_prev    = calculate_rsi(closes[:-3], period=14) if len(closes) > 17 else None
-    rsi_rising  = rsi_prev is not None and rsi > rsi_prev
-    rsi_falling = rsi_prev is not None and rsi < rsi_prev
+    rsi_rising  = rsi_prev is not None and rsi > rsi_prev + 3
+    rsi_falling = rsi_prev is not None and rsi < rsi_prev - 3
 
     # Consecutive candle direction (2 of last 3 must agree)
     dirs = [1 if closes[i] > opens[i] else (-1 if closes[i] < opens[i] else 0) for i in range(-3, 0)]
@@ -140,9 +140,9 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
     macro_bull = current_price > ema50
     macro_bear = current_price < ema50
 
-    # EMA spread filter
+    # EMA spread filter — raised to 0.05% to require a meaningful crossover, not just a tick
     ema_spread_pct = abs(ema10 - ema20) / ema20 * 100
-    ema_spread_ok  = ema_spread_pct >= 0.02
+    ema_spread_ok  = ema_spread_pct >= 0.05
 
     logger.debug(
         f"{symbol} | Price={current_price:.4f} RSI={rsi:.1f} "
@@ -157,10 +157,11 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
     buy_reasons = []
 
     # Path 1 — Mean-reversion BUY
-    # Price below lower BB + RSI oversold + RSI has ALREADY started rising
-    if current_price < bb_lower and rsi < 35 and rsi_rising:
+    # Price below lower BB + RSI deeply oversold + RSI has confirmed reversal (≥3pt rise)
+    bb_penetration_buy = (bb_lower - current_price) / bb_lower * 100 if bb_lower else 0
+    if current_price < bb_lower and rsi < 30 and rsi_rising and bb_penetration_buy >= 0.1:
         buy_confidence += 0.65
-        buy_reasons.append(f"BB oversold reversal | RSI={rsi:.1f} rising")
+        buy_reasons.append(f"BB oversold reversal | RSI={rsi:.1f} rising | depth={bb_penetration_buy:.2f}%")
 
     # Path 2 — Trend-following BUY (only in macro uptrend, RSI in mid-range — avoid extremes and chop)
     elif macro_bull and rsi > 35 and rsi < 65:
@@ -184,10 +185,11 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
     sell_reasons = []
 
     # Path 1 — Mean-reversion SELL
-    # Price above upper BB + RSI overbought + RSI has ALREADY started falling
-    if current_price > bb_upper and rsi > 65 and rsi_falling:
+    # Price above upper BB + RSI deeply overbought + RSI has confirmed reversal (≥3pt drop)
+    bb_penetration_sell = (current_price - bb_upper) / bb_upper * 100 if bb_upper else 0
+    if current_price > bb_upper and rsi > 70 and rsi_falling and bb_penetration_sell >= 0.1:
         sell_confidence += 0.65
-        sell_reasons.append(f"BB overbought reversal | RSI={rsi:.1f} falling")
+        sell_reasons.append(f"BB overbought reversal | RSI={rsi:.1f} falling | depth={bb_penetration_sell:.2f}%")
 
     # Path 2 — Trend-following SELL (only in macro downtrend, RSI in mid-range — avoid extremes and chop)
     elif macro_bear and rsi > 35 and rsi < 65:
@@ -207,8 +209,8 @@ def generate_signal(candles: list, symbol: str) -> TradeSignal:
     # ── Decision ─────────────────────────────────────────────────────
     threshold = 0.65
 
-    buy_mean_rev  = current_price < bb_lower and rsi < 35
-    sell_mean_rev = current_price > bb_upper and rsi > 65
+    buy_mean_rev  = current_price < bb_lower and rsi < 30
+    sell_mean_rev = current_price > bb_upper and rsi > 70
 
     if buy_confidence >= threshold or sell_confidence >= threshold:
         if buy_confidence > sell_confidence and buy_confidence >= threshold:

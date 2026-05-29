@@ -27,8 +27,8 @@ class TradingConfig:
     risk_reward_ratio: float = 2.0          # Target 1:2 risk/reward
 
     # Strategy settings
-    symbol: str = "R_25"                    # Primary symbol (used if symbols list is empty)
-    symbols: str = ""                       # Comma-separated list of symbols to rotate through
+    symbol: str = "R_50"                    # Primary symbol (used if symbols list is empty)
+    symbols: str = "R_50,R_75"             # Rotate between mid-volatility symbols only
     contract_type: str = "CALL"             # CALL/PUT
     duration: int = 5                       # Contract duration in minutes
     duration_unit: str = "m"               # m=minutes, t=ticks, s=seconds, h=hours, d=days
