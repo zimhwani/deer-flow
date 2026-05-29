@@ -110,23 +110,38 @@ async def api_mt5_trade(request):
         trade_type = data.get("type", "")
 
         if trade_type == "open":
+            sym = data.get("symbol", "")
+            direction = data.get("direction", "")
+            price = float(data.get("price", 0))
+            open_time = data.get("time", "")
+            # Deduplicate: skip if identical open already recorded
+            for t in _mt5_trades:
+                if (t.get("type") == "open" and t.get("symbol") == sym and
+                        t.get("direction") == direction and
+                        t.get("price") == price and t.get("opened_at") == open_time):
+                    return web.json_response({"ok": True, "duplicate": True})
             _mt5_trades.append({
                 "id": len(_mt5_trades),
                 "type": "open",
-                "direction": data.get("direction", ""),
-                "symbol": data.get("symbol", ""),
+                "direction": direction,
+                "symbol": sym,
                 "lots": float(data.get("lots", 0)),
-                "price": float(data.get("price", 0)),
+                "price": price,
                 "sl": float(data.get("sl", 0)),
                 "tp": float(data.get("tp", 0)),
                 "reason": data.get("reason", ""),
-                "opened_at": data.get("time", ""),
+                "opened_at": open_time,
                 "profit": None,
             })
         elif trade_type == "close":
             sym = data.get("symbol", "")
             profit = float(data.get("profit", 0))
             close_time = data.get("time", "")
+            # Deduplicate: skip if identical close already recorded
+            for t in _mt5_trades:
+                if (t.get("type") == "closed" and t.get("symbol") == sym and
+                        t.get("profit") == profit and t.get("closed_at") == close_time):
+                    return web.json_response({"ok": True, "duplicate": True})
             matched = False
             for t in reversed(_mt5_trades):
                 if t.get("symbol") == sym and t.get("type") == "open":
