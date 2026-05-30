@@ -8,7 +8,7 @@
 //|  Timeframe: M1                                                   |
 //+------------------------------------------------------------------+
 #property copyright "DeerFlow"
-#property version   "1.00"
+#property version   "1.01"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -25,23 +25,23 @@ input double InpBbDeviation    = 2.0;   // Bollinger Bands std deviation
 input double InpConfidence     = 0.60;  // Signal confidence threshold
 
 input group "Trade Sizing"
-input double InpLotSize        = 0.30;  // Default lot size
+input double InpLotSize        = 0.30;  // Fallback lot size (used if dynamic sizing fails)
 input double InpMaxRiskPct     = 2.0;   // Max risk % of balance per trade
 
-input group "Exit Levels — Trend trades"
-input int    InpTrendSL        = 300;   // Stop loss  (points) for trend trades
-input int    InpTrendTP        = 600;   // Take profit (points) for trend trades
-
-input group "Exit Levels — Mean-reversion trades"
-input int    InpRevSL          = 500;   // Stop loss  (points) for mean-rev trades
-input int    InpRevTP          = 1000;  // Take profit (points) for mean-rev trades
+input group "Exit Levels — ATR-based (both paths)"
+input double InpTrendSLAtrMult = 1.5;  // ATR multiplier for trend stop loss
+input double InpTrendTPRatio   = 2.0;  // TP = SL * this ratio for trend trades
+input double InpRevSLAtrMult   = 2.5;  // ATR multiplier for mean-rev stop loss
+input double InpRevTPRatio     = 2.0;  // TP = SL * this ratio for mean-rev trades
 
 input group "Risk Management"
-input int    InpMaxPositions   = 3;     // Max open positions at once
+input int    InpMaxPositions   = 2;     // Max open positions at once (reduced for correlation control)
+input int    InpMaxPerDirection = 1;    // Max positions per direction class (CRASH or BOOM)
 input bool   InpUseDailyLoss   = true;  // Enable daily loss limit
-input double InpDailyLossPct   = 10.0; // Daily loss limit % of balance
+input double InpDailyLossPct   = 6.0;  // Daily loss limit % of balance (tightened from 10%)
 input bool   InpUseDailyTarget = false; // Enable daily profit target
 input double InpDailyTargetPct = 999.0; // Daily profit target %
+input double InpSpikeAtrMult   = 3.0;  // Candle range > this * ATR14 = spike, skip mean-rev
 
 input group "Dashboard Bridge"
 input string InpDashboardUrl   = "http://209.38.87.199/api/mt5/trade"; // Dashboard URL (empty to disable)
@@ -54,7 +54,7 @@ input bool   InpTradeOnNewBar  = true;  // Only trade on new M1 bar open
 CTrade  trade;
 double  g_dailyStartBalance = 0;
 datetime g_currentDay       = 0;
-int     g_hEmaFast, g_hEmaSlow, g_hEmaMacro, g_hRsi, g_hBB;
+int     g_hEmaFast, g_hEmaSlow, g_hEmaMacro, g_hRsi, g_hBB, g_hAtr;
 
 //+------------------------------------------------------------------+
 int OnInit()
@@ -67,9 +67,11 @@ int OnInit()
    g_hEmaMacro= iMA(_Symbol, PERIOD_M1, InpEmaMacro,0, MODE_EMA, PRICE_CLOSE);
    g_hRsi     = iRSI(_Symbol, PERIOD_M1, InpRsiPeriod, PRICE_CLOSE);
    g_hBB      = iBands(_Symbol, PERIOD_M1, InpBbPeriod, 0, InpBbDeviation, PRICE_CLOSE);
+   g_hAtr     = iATR(_Symbol, PERIOD_M1, 14);
 
    if(g_hEmaFast == INVALID_HANDLE || g_hEmaSlow == INVALID_HANDLE ||
-      g_hEmaMacro == INVALID_HANDLE || g_hRsi == INVALID_HANDLE || g_hBB == INVALID_HANDLE)
+      g_hEmaMacro == INVALID_HANDLE || g_hRsi == INVALID_HANDLE ||
+      g_hBB == INVALID_HANDLE || g_hAtr == INVALID_HANDLE)
    {
       Print("ERROR: Failed to create indicator handles");
       return INIT_FAILED;
@@ -78,7 +80,7 @@ int OnInit()
    g_dailyStartBalance = AccountInfoDouble(ACCOUNT_BALANCE);
    g_currentDay        = iTime(_Symbol, PERIOD_D1, 0);
 
-   Print("DeerFlow EA started | Symbol: ", _Symbol,
+   Print("DeerFlow EA v1.01 started | Symbol: ", _Symbol,
          " | Balance: ", g_dailyStartBalance,
          " | Magic: ", InpMagicNumber);
    return INIT_SUCCEEDED;
@@ -92,6 +94,7 @@ void OnDeinit(const int reason)
    IndicatorRelease(g_hEmaMacro);
    IndicatorRelease(g_hRsi);
    IndicatorRelease(g_hBB);
+   IndicatorRelease(g_hAtr);
    Print("DeerFlow EA stopped");
 }
 
@@ -131,11 +134,11 @@ void OnTick()
       return;
    }
 
-   // Max positions guard
+   // Max total positions guard
    if(CountMyPositions() >= InpMaxPositions) return;
 
    // ── Read indicators ──────────────────────────────────────────────
-   double ema10[3], ema20[6], ema50[1], rsi[2], bbUp[1], bbLow[1];
+   double ema10[3], ema20[6], ema50[1], rsi[2], bbUp[1], bbLow[1], atrBuf[2];
 
    if(CopyBuffer(g_hEmaFast,  0, 0, 3, ema10)  < 3) return;
    if(CopyBuffer(g_hEmaSlow,  0, 0, 6, ema20)  < 6) return;
@@ -143,14 +146,15 @@ void OnTick()
    if(CopyBuffer(g_hRsi,      0, 0, 2, rsi)    < 2) return;
    if(CopyBuffer(g_hBB, UPPER_BAND, 0, 1, bbUp)  < 1) return;
    if(CopyBuffer(g_hBB, LOWER_BAND, 0, 1, bbLow) < 1) return;
+   if(CopyBuffer(g_hAtr,      0, 0, 2, atrBuf) < 2) return;
 
-   // ArraySetAsSeries so index 0 = most recent
-   ArraySetAsSeries(ema10,  true);
-   ArraySetAsSeries(ema20,  true);
-   ArraySetAsSeries(ema50,  true);
-   ArraySetAsSeries(rsi,    true);
-   ArraySetAsSeries(bbUp,   true);
-   ArraySetAsSeries(bbLow,  true);
+   ArraySetAsSeries(ema10,   true);
+   ArraySetAsSeries(ema20,   true);
+   ArraySetAsSeries(ema50,   true);
+   ArraySetAsSeries(rsi,     true);
+   ArraySetAsSeries(bbUp,    true);
+   ArraySetAsSeries(bbLow,   true);
+   ArraySetAsSeries(atrBuf,  true);
 
    double price       = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double emaFast     = ema10[0];
@@ -160,9 +164,17 @@ void OnTick()
    double rsiPrev     = rsi[1];
    double bbUpper     = bbUp[0];
    double bbLower     = bbLow[0];
+   double atrNow      = atrBuf[0];
+   double pt          = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+
+   // ── Spike filter — skip mean-reversion on spike candles ─────────
+   double lastCandleHigh  = iHigh(_Symbol, PERIOD_M1, 1);
+   double lastCandleLow   = iLow (_Symbol, PERIOD_M1, 1);
+   double lastCandleRange = lastCandleHigh - lastCandleLow;
+   bool   isSpike         = (atrNow > 0 && lastCandleRange > InpSpikeAtrMult * atrNow);
 
    // ── Derived conditions ───────────────────────────────────────────
-   bool trendUp   = ema20[0] > ema20[4];   // EMA20 slope over ~5 bars
+   bool trendUp   = ema20[0] > ema20[4];
    bool trendDown = ema20[0] < ema20[4];
    bool rsiRising  = rsiNow > rsiPrev;
    bool rsiFalling = rsiNow < rsiPrev;
@@ -172,7 +184,6 @@ void OnTick()
    double emaSpreadPct = MathAbs(emaFast - emaSlow) / emaSlow * 100.0;
    bool   emaSpreadOk  = emaSpreadPct >= 0.02;
 
-   // Consecutive candles (last 3)
    int bullCount = 0, bearCount = 0;
    for(int i = 1; i <= 3; i++)
    {
@@ -184,67 +195,103 @@ void OnTick()
    bool consecBull = bullCount >= 2;
    bool consecBear = bearCount >= 2;
 
-   // ── Signal scoring (mirrors Python) ─────────────────────────────
+   // ── Correlation cap — count CRASH vs BOOM exposure separately ───
+   int crashCount = 0, boomCount = 0;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      string sym = PositionGetSymbol(i);
+      if((long)PositionGetInteger(POSITION_MAGIC) != InpMagicNumber) continue;
+      if(StringFind(sym, "CRASH") >= 0) crashCount++;
+      if(StringFind(sym, "BOOM")  >= 0) boomCount++;
+   }
+   bool isCrashSymbol = StringFind(_Symbol, "CRASH") >= 0;
+   bool isBoomSymbol  = StringFind(_Symbol, "BOOM")  >= 0;
+   if(isCrashSymbol && crashCount >= InpMaxPerDirection) return;
+   if(isBoomSymbol  && boomCount  >= InpMaxPerDirection) return;
+
+   // ── Signal scoring ───────────────────────────────────────────────
    double buyConf  = 0.0;
    double sellConf = 0.0;
    bool   isMeanRevBuy  = false;
    bool   isMeanRevSell = false;
 
    // Path 1 — Mean-reversion BUY
-   if(price < bbLower && rsiNow < 35.0 && rsiRising)
+   // Base 0.45 requires macro confirmation (+0.20) to cross the 0.60 threshold.
+   // Prevents fading into a strong macro downtrend.
+   if(!isSpike && price < bbLower && rsiNow < 35.0 && rsiRising)
    {
-      buyConf += 0.65;
+      buyConf += 0.45;
       isMeanRevBuy = true;
+      if(macroBull) buyConf += 0.20;  // macro aligned: don't buy into downtrend
    }
    // Path 2 — Trend BUY
    else if(macroBull && rsiNow > 28.0 && rsiNow < 72.0)
    {
-      if(emaFast > emaSlow && emaSpreadOk)  buyConf += 0.30;
-      if(trendUp)                           buyConf += 0.15;
-      if(rsiNow > 35.0 && rsiNow < 60.0 && rsiRising) buyConf += 0.15;
-      if(consecBull)                        buyConf += 0.15;
+      if(emaFast > emaSlow && emaSpreadOk)                          buyConf += 0.30;
+      if(trendUp)                                                    buyConf += 0.15;
+      if(rsiNow > 35.0 && rsiNow < 60.0 && rsiRising)              buyConf += 0.15;
+      if(consecBull)                                                 buyConf += 0.15;
    }
 
    // Path 1 — Mean-reversion SELL
-   if(price > bbUpper && rsiNow > 65.0 && rsiFalling)
+   // Base 0.45 requires macro confirmation (+0.20) to cross the 0.60 threshold.
+   if(!isSpike && price > bbUpper && rsiNow > 65.0 && rsiFalling)
    {
-      sellConf += 0.65;
+      sellConf += 0.45;
       isMeanRevSell = true;
+      if(macroBear) sellConf += 0.20;  // macro aligned: don't sell into uptrend
    }
    // Path 2 — Trend SELL
    else if(macroBear && rsiNow > 45.0)
    {
-      if(emaFast < emaSlow && emaSpreadOk)  sellConf += 0.30;
-      if(trendDown)                         sellConf += 0.15;
-      if(rsiNow > 40.0 && rsiNow < 65.0 && rsiFalling) sellConf += 0.15;
-      if(consecBear)                        sellConf += 0.15;
+      if(emaFast < emaSlow && emaSpreadOk)                           sellConf += 0.30;
+      if(trendDown)                                                   sellConf += 0.15;
+      if(rsiNow > 40.0 && rsiNow < 65.0 && rsiFalling)              sellConf += 0.15;
+      if(consecBear)                                                  sellConf += 0.15;
    }
 
    // ── Execute ──────────────────────────────────────────────────────
    if(buyConf >= InpConfidence && buyConf > sellConf)
    {
-      int sl = isMeanRevBuy ? InpRevSL : InpTrendSL;
-      int tp = isMeanRevBuy ? InpRevTP : InpTrendTP;
-      OpenBuy(sl, tp, isMeanRevBuy ? "mean-rev" : "trend");
+      double slPts, tpPts;
+      if(isMeanRevBuy)
+      {
+         // ATR-based SL/TP for mean-reversion — adapts to current volatility
+         slPts = MathMax(InpRevSLAtrMult * atrNow / pt, (double)MinStopPoints());
+         tpPts = slPts * InpRevTPRatio;
+      }
+      else
+      {
+         slPts = MathMax(InpTrendSLAtrMult * atrNow / pt, (double)MinStopPoints());
+         tpPts = slPts * InpTrendTPRatio;
+      }
+      OpenBuy(slPts, tpPts, isMeanRevBuy ? "mean-rev" : "trend");
    }
    else if(sellConf >= InpConfidence && sellConf > buyConf)
    {
-      int sl = isMeanRevSell ? InpRevSL : InpTrendSL;
-      int tp = isMeanRevSell ? InpRevTP : InpTrendTP;
-      OpenSell(sl, tp, isMeanRevSell ? "mean-rev" : "trend");
+      double slPts, tpPts;
+      if(isMeanRevSell)
+      {
+         slPts = MathMax(InpRevSLAtrMult * atrNow / pt, (double)MinStopPoints());
+         tpPts = slPts * InpRevTPRatio;
+      }
+      else
+      {
+         slPts = MathMax(InpTrendSLAtrMult * atrNow / pt, (double)MinStopPoints());
+         tpPts = slPts * InpTrendTPRatio;
+      }
+      OpenSell(slPts, tpPts, isMeanRevSell ? "mean-rev" : "trend");
    }
 }
 
 //+------------------------------------------------------------------+
-// Posts a JSON payload to the dashboard. Requires the URL to be
-// whitelisted in MT5 → Tools → Options → Expert Advisors → Allow WebRequests.
 void PostToDashboard(string json)
 {
    if(StringLen(InpDashboardUrl) < 8) return;
    char   post[], result[];
    string headers = "Content-Type: application/json\r\n";
    string resultHeaders;
-   int    len = StringToCharArray(json, post) - 1;  // strip null terminator
+   int    len = StringToCharArray(json, post) - 1;
    ArrayResize(post, len);
    PrintFormat("Dashboard POST attempt: %s", InpDashboardUrl);
    int res = WebRequest("POST", InpDashboardUrl, headers, 5000, post, result, resultHeaders);
@@ -252,33 +299,58 @@ void PostToDashboard(string json)
 }
 
 //+------------------------------------------------------------------+
-// Returns the minimum stop distance in points.
-// Deriv reports SYMBOL_TRADE_STOPS_LEVEL but the actual enforced minimum is
-// often 3-5x higher for synthetic indices, so we apply a 5x safety multiplier.
 int MinStopPoints()
 {
    int stopLevel = (int)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
-   int safeLevel = stopLevel * 5 + 100;
-   PrintFormat("MinStopPoints: reported=%d  safe=%d  symbol=%s", stopLevel, safeLevel, _Symbol);
-   return safeLevel;
+   // Deriv's reported stop level consistently underestimates the enforced minimum
+   // on synthetic indices (V25/V50/V75/V100). Use 5x multiplier + 100pt buffer.
+   return stopLevel * 5 + 100;
 }
 
 //+------------------------------------------------------------------+
-void OpenBuy(int slPoints, int tpPoints, string reason)
+// Calculates lot size based on account risk % and SL distance.
+// Falls back to InpLotSize if calculation produces invalid result.
+double CalcLots(double slPoints)
 {
-   double ask  = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-   double pt   = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   double balance   = AccountInfoDouble(ACCOUNT_BALANCE);
+   double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   double tickSize  = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   double pt        = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+
+   if(tickValue <= 0 || tickSize <= 0 || slPoints <= 0)
+      return NormaliseLots(InpLotSize);
+
+   double riskAmount  = balance * InpMaxRiskPct / 100.0;
+   double slInTicks   = slPoints * pt / tickSize;
+   double lotSize     = riskAmount / (slInTicks * tickValue);
+
+   lotSize = NormaliseLots(lotSize);
+
+   double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   if(lotSize < minLot || lotSize > maxLot)
+      return NormaliseLots(InpLotSize);
+
+   return lotSize;
+}
+
+//+------------------------------------------------------------------+
+void OpenBuy(double slPoints, double tpPoints, string reason)
+{
+   double ask   = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double pt    = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    int    minSL = MinStopPoints();
-   slPoints = MathMax(slPoints, minSL);
-   tpPoints = MathMax(tpPoints, minSL);
+   slPoints = MathMax(slPoints, (double)minSL);
+   tpPoints = MathMax(tpPoints, (double)minSL);
    double sl   = ask - slPoints * pt;
    double tp   = ask + tpPoints * pt;
-   double lots = NormaliseLots(InpLotSize);
+   double lots = CalcLots(slPoints);
 
    if(trade.Buy(lots, _Symbol, ask, sl, tp,
                 StringFormat("DeerFlow BUY %s", reason)))
    {
-      PrintFormat("BUY %s opened | lots=%.2f ask=%.5f SL=%.5f TP=%.5f", reason, lots, ask, sl, tp);
+      PrintFormat("BUY %s opened | lots=%.2f ask=%.5f SL=%.5f TP=%.5f sl_pts=%.0f",
+                  reason, lots, ask, sl, tp, slPoints);
       PostToDashboard(StringFormat(
          "{\"type\":\"open\",\"direction\":\"BUY\",\"symbol\":\"%s\",\"lots\":%.2f,"
          "\"price\":%.5f,\"sl\":%.5f,\"tp\":%.5f,\"reason\":\"%s\",\"time\":\"%s\"}",
@@ -290,21 +362,22 @@ void OpenBuy(int slPoints, int tpPoints, string reason)
 }
 
 //+------------------------------------------------------------------+
-void OpenSell(int slPoints, int tpPoints, string reason)
+void OpenSell(double slPoints, double tpPoints, string reason)
 {
    double bid  = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double pt   = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    int    minSL = MinStopPoints();
-   slPoints = MathMax(slPoints, minSL);
-   tpPoints = MathMax(tpPoints, minSL);
+   slPoints = MathMax(slPoints, (double)minSL);
+   tpPoints = MathMax(tpPoints, (double)minSL);
    double sl   = bid + slPoints * pt;
    double tp   = bid - tpPoints * pt;
-   double lots = NormaliseLots(InpLotSize);
+   double lots = CalcLots(slPoints);
 
    if(trade.Sell(lots, _Symbol, bid, sl, tp,
                  StringFormat("DeerFlow SELL %s", reason)))
    {
-      PrintFormat("SELL %s opened | lots=%.2f bid=%.5f SL=%.5f TP=%.5f", reason, lots, bid, sl, tp);
+      PrintFormat("SELL %s opened | lots=%.2f bid=%.5f SL=%.5f TP=%.5f sl_pts=%.0f",
+                  reason, lots, bid, sl, tp, slPoints);
       PostToDashboard(StringFormat(
          "{\"type\":\"open\",\"direction\":\"SELL\",\"symbol\":\"%s\",\"lots\":%.2f,"
          "\"price\":%.5f,\"sl\":%.5f,\"tp\":%.5f,\"reason\":\"%s\",\"time\":\"%s\"}",
@@ -316,7 +389,6 @@ void OpenSell(int slPoints, int tpPoints, string reason)
 }
 
 //+------------------------------------------------------------------+
-// Fires when a deal is added to history — catches trade closes.
 void OnTradeTransaction(const MqlTradeTransaction& trans,
                         const MqlTradeRequest&     request,
                         const MqlTradeResult&      result)
