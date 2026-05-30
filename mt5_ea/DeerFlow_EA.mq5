@@ -301,10 +301,14 @@ void PostToDashboard(string json)
 //+------------------------------------------------------------------+
 int MinStopPoints()
 {
-   int stopLevel = (int)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
-   // Deriv's reported stop level consistently underestimates the enforced minimum
-   // on synthetic indices (V25/V50/V75/V100). Use 5x multiplier + 100pt buffer.
-   return stopLevel * 5 + 100;
+   int    stopLevel = (int)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   double price     = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double pt        = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   // Deriv returns 0 or a tiny stop level for synthetic indices.
+   // Use the larger of: 5x reported level, or 0.5% of current price.
+   // 0.5% scales automatically across V25 (~2764), V50 (~92), V75 (~28400), V100 (~383).
+   int pricePct = (pt > 0) ? (int)(price * 0.005 / pt) : 0;
+   return MathMax(stopLevel * 5 + 100, pricePct);
 }
 
 //+------------------------------------------------------------------+
