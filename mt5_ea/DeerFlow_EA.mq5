@@ -252,11 +252,15 @@ void PostToDashboard(string json)
 }
 
 //+------------------------------------------------------------------+
-// Returns the minimum stop distance in points, with a small buffer.
+// Returns the minimum stop distance in points.
+// Deriv reports SYMBOL_TRADE_STOPS_LEVEL but the actual enforced minimum is
+// often 3-5x higher for synthetic indices, so we apply a 5x safety multiplier.
 int MinStopPoints()
 {
    int stopLevel = (int)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
-   return stopLevel + 10;  // 10-point buffer above the minimum
+   int safeLevel = stopLevel * 5 + 100;
+   PrintFormat("MinStopPoints: reported=%d  safe=%d  symbol=%s", stopLevel, safeLevel, _Symbol);
+   return safeLevel;
 }
 
 //+------------------------------------------------------------------+
