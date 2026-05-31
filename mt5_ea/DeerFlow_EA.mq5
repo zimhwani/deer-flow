@@ -403,7 +403,8 @@ void OnTradeTransaction(const MqlTradeTransaction& trans,
    if(!HistoryDealSelect(trans.deal))           return;
 
    long magic = HistoryDealGetInteger(trans.deal, DEAL_MAGIC);
-   if(magic != InpMagicNumber) return;
+   // Allow magic=0 (manual close) as well as our own magic number
+   if(magic != InpMagicNumber && magic != 0) return;
 
    long entry = HistoryDealGetInteger(trans.deal, DEAL_ENTRY);
    if(entry != DEAL_ENTRY_OUT) return;
