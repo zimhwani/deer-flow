@@ -138,12 +138,12 @@ void OnTick()
    if(CountMyPositions() >= InpMaxPositions) return;
 
    // ── Read indicators ──────────────────────────────────────────────
-   double ema10[3], ema20[6], ema50[1], rsi[2], bbUp[1], bbLow[1], atrBuf[2];
+   double ema10[3], ema20[6], ema50[1], rsi[4], bbUp[1], bbLow[1], atrBuf[2];
 
    if(CopyBuffer(g_hEmaFast,  0, 0, 3, ema10)  < 3) return;
    if(CopyBuffer(g_hEmaSlow,  0, 0, 6, ema20)  < 6) return;
    if(CopyBuffer(g_hEmaMacro, 0, 0, 1, ema50)  < 1) return;
-   if(CopyBuffer(g_hRsi,      0, 0, 2, rsi)    < 2) return;
+   if(CopyBuffer(g_hRsi,      0, 0, 4, rsi)    < 4) return;
    if(CopyBuffer(g_hBB, UPPER_BAND, 0, 1, bbUp)  < 1) return;
    if(CopyBuffer(g_hBB, LOWER_BAND, 0, 1, bbLow) < 1) return;
    if(CopyBuffer(g_hAtr,      0, 0, 2, atrBuf) < 2) return;
@@ -162,6 +162,7 @@ void OnTick()
    double emaMacro    = ema50[0];
    double rsiNow      = rsi[0];
    double rsiPrev     = rsi[1];
+   double rsi3Ago     = rsi[3];   // 3-candle lookback for direction confirmation
    double bbUpper     = bbUp[0];
    double bbLower     = bbLow[0];
    double atrNow      = atrBuf[0];
@@ -176,13 +177,14 @@ void OnTick()
    // ── Derived conditions ───────────────────────────────────────────
    bool trendUp   = ema20[0] > ema20[4];
    bool trendDown = ema20[0] < ema20[4];
-   bool rsiRising  = rsiNow > rsiPrev;
-   bool rsiFalling = rsiNow < rsiPrev;
+   // Require RSI to have moved ≥2 pts over 3 candles to count as genuine reversal
+   bool rsiRising  = (rsiNow - rsi3Ago) >= 2.0;
+   bool rsiFalling = (rsi3Ago - rsiNow) >= 2.0;
    bool macroBull  = price > emaMacro;
    bool macroBear  = price < emaMacro;
 
    double emaSpreadPct = MathAbs(emaFast - emaSlow) / emaSlow * 100.0;
-   bool   emaSpreadOk  = emaSpreadPct >= 0.02;
+   bool   emaSpreadOk  = emaSpreadPct >= 0.05;  // raised from 0.02 — require meaningful crossover
 
    int bullCount = 0, bearCount = 0;
    for(int i = 1; i <= 3; i++)
@@ -218,7 +220,7 @@ void OnTick()
    // Path 1 — Mean-reversion BUY
    // Base 0.45 requires macro confirmation (+0.20) to cross the 0.60 threshold.
    // Prevents fading into a strong macro downtrend.
-   if(!isSpike && price < bbLower && rsiNow < 35.0 && rsiRising)
+   if(!isSpike && price < bbLower && rsiNow < 30.0 && rsiRising)
    {
       buyConf += 0.45;
       isMeanRevBuy = true;
@@ -235,14 +237,14 @@ void OnTick()
 
    // Path 1 — Mean-reversion SELL
    // Base 0.45 requires macro confirmation (+0.20) to cross the 0.60 threshold.
-   if(!isSpike && price > bbUpper && rsiNow > 65.0 && rsiFalling)
+   if(!isSpike && price > bbUpper && rsiNow > 70.0 && rsiFalling)
    {
       sellConf += 0.45;
       isMeanRevSell = true;
       if(macroBear) sellConf += 0.20;  // macro aligned: don't sell into uptrend
    }
    // Path 2 — Trend SELL
-   else if(macroBear && rsiNow > 45.0)
+   else if(macroBear && rsiNow > 45.0 && rsiNow < 65.0)
    {
       if(emaFast < emaSlow && emaSpreadOk)                           sellConf += 0.30;
       if(trendDown)                                                   sellConf += 0.15;
