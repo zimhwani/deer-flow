@@ -138,10 +138,10 @@ void OnTick()
    if(CountMyPositions() >= InpMaxPositions) return;
 
    // ── Read indicators ──────────────────────────────────────────────
-   double ema10[3], ema20[6], ema50[1], rsi[4], bbUp[1], bbLow[1], atrBuf[2];
+   double ema10[3], ema20[16], ema50[1], rsi[4], bbUp[1], bbLow[1], atrBuf[2];
 
-   if(CopyBuffer(g_hEmaFast,  0, 0, 3, ema10)  < 3) return;
-   if(CopyBuffer(g_hEmaSlow,  0, 0, 6, ema20)  < 6) return;
+   if(CopyBuffer(g_hEmaFast,  0, 0,  3, ema10)  <  3) return;
+   if(CopyBuffer(g_hEmaSlow,  0, 0, 16, ema20)  < 16) return;
    if(CopyBuffer(g_hEmaMacro, 0, 0, 1, ema50)  < 1) return;
    if(CopyBuffer(g_hRsi,      0, 0, 4, rsi)    < 4) return;
    if(CopyBuffer(g_hBB, UPPER_BAND, 0, 1, bbUp)  < 1) return;
@@ -175,8 +175,8 @@ void OnTick()
    bool   isSpike         = (atrNow > 0 && lastCandleRange > InpSpikeAtrMult * atrNow);
 
    // ── Derived conditions ───────────────────────────────────────────
-   bool trendUp   = ema20[0] > ema20[4];
-   bool trendDown = ema20[0] < ema20[4];
+   bool trendUp   = ema20[0] > ema20[14];  // 15-candle slope — filters micro-bounces
+   bool trendDown = ema20[0] < ema20[14];
    // Require RSI to have moved ≥2 pts over 3 candles to count as genuine reversal
    bool rsiRising  = (rsiNow - rsi3Ago) >= 2.0;
    bool rsiFalling = (rsi3Ago - rsiNow) >= 2.0;
@@ -227,12 +227,12 @@ void OnTick()
       if(macroBull) buyConf += 0.20;  // macro aligned: don't buy into downtrend
    }
    // Path 2 — Trend BUY
+   // Requires EMA crossover + 15-min slope + RSI AND candle momentum together
    else if(macroBull && rsiNow > 28.0 && rsiNow < 72.0)
    {
       if(emaFast > emaSlow && emaSpreadOk)                          buyConf += 0.30;
       if(trendUp)                                                    buyConf += 0.15;
-      if(rsiNow > 35.0 && rsiNow < 60.0 && rsiRising)              buyConf += 0.15;
-      if(consecBull)                                                 buyConf += 0.15;
+      if(rsiNow > 35.0 && rsiNow < 60.0 && rsiRising && consecBull) buyConf += 0.30;
    }
 
    // Path 1 — Mean-reversion SELL
@@ -244,12 +244,12 @@ void OnTick()
       if(macroBear) sellConf += 0.20;  // macro aligned: don't sell into uptrend
    }
    // Path 2 — Trend SELL
+   // Requires EMA crossover + 15-min slope + RSI AND candle momentum together
    else if(macroBear && rsiNow > 45.0 && rsiNow < 65.0)
    {
-      if(emaFast < emaSlow && emaSpreadOk)                           sellConf += 0.30;
-      if(trendDown)                                                   sellConf += 0.15;
-      if(rsiNow > 40.0 && rsiNow < 65.0 && rsiFalling)              sellConf += 0.15;
-      if(consecBear)                                                  sellConf += 0.15;
+      if(emaFast < emaSlow && emaSpreadOk)                            sellConf += 0.30;
+      if(trendDown)                                                    sellConf += 0.15;
+      if(rsiNow > 40.0 && rsiNow < 65.0 && rsiFalling && consecBear) sellConf += 0.30;
    }
 
    // ── Execute ──────────────────────────────────────────────────────
