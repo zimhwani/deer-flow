@@ -110,51 +110,61 @@ async def api_mt5_trade(request):
         if trade_type == "open":
             sym = data.get("symbol", "")
             direction = data.get("direction", "")
-            price = float(data.get("price", 0))
-            open_time = data.get("time", "")
-            for t in _mt5_trades:
-                if (t.get("type") == "open" and t.get("symbol") == sym and
-                        t.get("direction") == direction and
-                        t.get("price") == price and t.get("opened_at") == open_time):
-                    return web.json_response({"ok": True, "duplicate": True})
+            # One open record per (symbol, direction) — update in place if exists
+            existing = next(
+                (t for t in _mt5_trades if t.get("type") == "open"
+                 and t.get("symbol") == sym and t.get("direction") == direction),
+                None,
+            )
+            if existing:
+                existing["lots"]      = float(data.get("lots", 0))
+                existing["price"]     = float(data.get("price", 0))
+                existing["sl"]        = float(data.get("sl", 0))
+                existing["tp"]        = float(data.get("tp", 0))
+                existing["reason"]    = data.get("reason", "")
+                existing["opened_at"] = data.get("time", "")
+                return web.json_response({"ok": True, "updated": True})
             _mt5_trades.append({
-                "id": len(_mt5_trades),
-                "type": "open",
+                "id":        len(_mt5_trades),
+                "type":      "open",
                 "direction": direction,
-                "symbol": sym,
-                "lots": float(data.get("lots", 0)),
-                "price": price,
-                "sl": float(data.get("sl", 0)),
-                "tp": float(data.get("tp", 0)),
-                "reason": data.get("reason", ""),
-                "opened_at": open_time,
-                "profit": None,
+                "symbol":    sym,
+                "lots":      float(data.get("lots", 0)),
+                "price":     float(data.get("price", 0)),
+                "sl":        float(data.get("sl", 0)),
+                "tp":        float(data.get("tp", 0)),
+                "reason":    data.get("reason", ""),
+                "opened_at": data.get("time", ""),
+                "profit":    None,
             })
         elif trade_type == "close":
             sym = data.get("symbol", "")
+            direction = data.get("direction", "")
             profit = float(data.get("profit", 0))
             close_time = data.get("time", "")
+            # Deduplicate: skip if identical close already recorded
             for t in _mt5_trades:
                 if (t.get("type") == "closed" and t.get("symbol") == sym and
                         t.get("profit") == profit and t.get("closed_at") == close_time):
                     return web.json_response({"ok": True, "duplicate": True})
             matched = False
             for t in reversed(_mt5_trades):
-                if t.get("symbol") == sym and t.get("type") == "open":
-                    t["type"] = "closed"
-                    t["profit"] = profit
+                if (t.get("symbol") == sym and t.get("type") == "open"
+                        and t.get("direction") == direction):
+                    t["type"]      = "closed"
+                    t["profit"]    = profit
                     t["closed_at"] = close_time
                     matched = True
                     break
             if not matched:
                 _mt5_trades.append({
-                    "id": len(_mt5_trades),
-                    "type": "closed",
-                    "direction": data.get("direction", ""),
-                    "symbol": sym,
-                    "lots": float(data.get("lots", 0)),
-                    "price": float(data.get("price", 0)),
-                    "profit": profit,
+                    "id":        len(_mt5_trades),
+                    "type":      "closed",
+                    "direction": direction,
+                    "symbol":    sym,
+                    "lots":      float(data.get("lots", 0)),
+                    "price":     float(data.get("price", 0)),
+                    "profit":    profit,
                     "opened_at": "",
                     "closed_at": close_time,
                 })
@@ -163,6 +173,15 @@ async def api_mt5_trade(request):
         return web.json_response({"ok": True})
     except Exception as e:
         return web.json_response({"error": str(e)}, status=400)
+
+
+async def api_mt5_clear_open(request):
+    """Remove all stale 'open' records — call when dashboard count exceeds reality."""
+    global _mt5_trades
+    before = sum(1 for t in _mt5_trades if t.get("type") == "open")
+    _mt5_trades = [t for t in _mt5_trades if t.get("type") != "open"]
+    _save_mt5_trades()
+    return web.json_response({"ok": True, "removed": before})
 
 
 async def api_mt5_stats(request):
@@ -964,6 +983,7 @@ def build_app() -> web.Application:
     app.router.add_get("/api/stats", api_stats)
     app.router.add_get("/api/log", api_log)
     app.router.add_post("/api/mt5/trade", api_mt5_trade)
+    app.router.add_post("/api/mt5/clear-open", api_mt5_clear_open)
     app.router.add_get("/api/mt5/stats", api_mt5_stats)
     return app
 
